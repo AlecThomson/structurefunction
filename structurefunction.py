@@ -75,7 +75,6 @@ def rm_structure(RM, d_RM, coords, samples, bins):
         diffs_dist.append(diffs)
     diffs_dist = np.array(diffs_dist)
 
-
     d_diff_dist = (d_FX_dist - d_FY_dist)**2
 
     d_diffs_dist = []
@@ -90,19 +89,19 @@ def rm_structure(RM, d_RM, coords, samples, bins):
     
     ##############################################################################
     print('Making coord grid')
-    cX, cY = np.meshgrid(coords, coords)
+    cX_ra, cY_ra = np.meshgrid(coords.ra, coords.ra)
+    cX_dec, cY_dec = np.meshgrid(coords.dec, coords.dec)
 
     print('Computing angular separations')
-    cx_perm = cX[np.triu_indices_from(cX, k=+1)]
-    cy_perm = cY[np.triu_indices_from(cY, k=+1)]
+    cx_ra_perm = cX_ra[np.triu_indices_from(cX_ra, k=+1)]
+    cx_dec_perm = cX_dec[np.triu_indices_from(cX_dec, k=+1)]
 
-    ras_x = [_cx.ra.deg for _cx in cx_perm]
-    decs_x = [_cx.dec.deg for _cx in cx_perm]
-    coords_x = SkyCoord(ras_x*u.deg, decs_x*u.deg)
+    cy_ra_perm = cY_ra[np.triu_indices_from(cY_ra, k=+1)]
+    cy_dec_perm = cY_dec[np.triu_indices_from(cY_dec, k=+1)]
 
-    ras_y = [_cy.ra.deg for _cy in cy_perm]
-    decs_y = [_cy.dec.deg for _cy in cy_perm]
-    coords_y = SkyCoord(ras_y*u.deg, decs_y*u.deg)
+    coords_x = SkyCoord(cx_ra_perm, cx_dec_perm)
+    coords_y = SkyCoord(cy_ra_perm, cy_dec_perm)
+
     dtheta = coords_x.separation(coords_y)
     ##############################################################################
     
@@ -121,7 +120,7 @@ def rm_structure(RM, d_RM, coords, samples, bins):
             centre = (bins[i]+bins[i+1])/2
 
             cbins[i] = centre
-            count[i] = sum(bin_idx)
+            count[i] = np.sum(bin_idx)
             sf_dist = np.nanmean(diffs_dist[:, bin_idx], axis=1)
             d_sf_dist = np.nanmean(d_diffs_dist[:, bin_idx], axis=1)
 
