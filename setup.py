@@ -22,7 +22,7 @@ VERSION = '0.1.0'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    'tqdm', 'numpy', 'astropy',
+    'tqdm', 'numpy', 'astropy', 'matplotlib'
 ]
 
 # What packages are optional?
