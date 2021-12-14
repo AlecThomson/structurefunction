@@ -20,7 +20,7 @@ Computing the error on the structure is diffifcult. Here I use Monte-Carlo error
 
 To get the latest version from this repo
 ```
-pip install githttps://github.com/AlecThomson/structurefunction
+pip install git+https://github.com/AlecThomson/structurefunction
 ```
 Or, install from PyPi
 ```
