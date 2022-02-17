@@ -2,12 +2,10 @@ from typing import Tuple
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
-from scipy.misc import face
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import itertools
 import warnings
-from astropy.modeling import models, fitting
 import bilby
 from sigfig import round
 import corner
