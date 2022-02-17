@@ -14,6 +14,7 @@ def structure_function(
     samples: int,
     bins: u.Quantity,
     show_plots=False,
+    verbose=False,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
     """Compute the second order structure function with Monte-Carlo error propagation.
@@ -35,29 +36,33 @@ def structure_function(
     """
 
     # Sample the errors assuming a Gaussian distribution
-    print("Sampling errors...")
+    if verbose:
+        print("Sampling errors...")
     rm_dist = []
     d_rm_dist = []
-    for i in tqdm(range(data.shape[0]), "Sample Gaussian"):
+    for i in tqdm(range(data.shape[0]), "Sample Gaussian", disable=not verbose):
         rm_dist.append(np.random.normal(loc=data[i], scale=errors[i], size=samples))
         d_rm_dist.append(np.random.normal(loc=errors[i], scale=errors[i], size=samples))
     rm_dist = np.array(rm_dist)
     d_rm_dist = np.array(d_rm_dist)
 
     # Get all combinations of sources and compute the difference
-    print("Getting data differences...")
+    if verbose:
+        print("Getting data differences...")
     F_dist = np.array(list(itertools.combinations(rm_dist, r=2)))
 
     diffs_dist = ((F_dist[:, 0] - F_dist[:, 1]) ** 2).T
 
     # Get all combinations of data_errs sources and compute the difference
-    print("Getting data error differences...")
+    if verbose:
+        print("Getting data error differences...")
     dF_dist = np.array(list(itertools.combinations(d_rm_dist, r=2)))
 
     d_diffs_dist = ((dF_dist[:, 0] - dF_dist[:, 1]) ** 2).T
 
     # Get the angular separation of the source paris
-    print("Getting angular separations...")
+    if verbose:
+        print("Getting angular separations...")
     cx_ra_perm, cy_ra_perm = np.array(
         list(itertools.combinations(coords.ra.to(u.deg).value, r=2))
     ).T
@@ -70,12 +75,13 @@ def structure_function(
     dtheta = coords_x.separation(coords_y)
 
     # Compute the SF
-    print("Computing SF...")
+    if verbose:
+        print("Computing SF...")
     sf_dists = np.zeros((len(bins) - 1, samples)) * np.nan
     d_sf_dists = np.zeros((len(bins) - 1, samples)) * np.nan
     count = np.zeros((len(bins) - 1)) * np.nan
     cbins = np.zeros((len(bins) - 1)) * np.nan * u.deg
-    for i, b in enumerate(tqdm(bins)):
+    for i, b in enumerate(tqdm(bins, disable=not verbose)):
         if i + 1 == len(bins):
             break
         else:
@@ -129,7 +135,7 @@ def structure_function(
         counts = []
         cor_dists = sf_dists - d_sf_dists
         plt.figure()
-        for dist in tqdm(cor_dists):
+        for dist in tqdm(cor_dists, disable=not verbose):
             n, hbins, _ = plt.hist(
                 dist, range=(np.nanmin(cor_dists), np.nanmax(cor_dists)), bins=100
             )
