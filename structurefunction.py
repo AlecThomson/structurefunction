@@ -2,15 +2,23 @@ from typing import Tuple
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
+from scipy.misc import face
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import itertools
 import warnings
 from astropy.modeling import models, fitting
+import bilby
+from sigfig import round
+import corner
 warnings.filterwarnings('ignore', message='All-NaN slice encountered')
 warnings.filterwarnings('ignore', message='All-NaN axis encountered')
 warnings.filterwarnings('ignore', message='Mean of empty slice')
 
+def model(x, amplitude, x_break, alpha_1, alpha_2):
+    alpha = np.where(x < x_break, alpha_1, alpha_2)
+    xx = x / x_break
+    return amplitude * np.power(xx,-alpha)
 
 def structure_function(
     data: u.Quantity,
@@ -21,6 +29,7 @@ def structure_function(
     show_plots=False,
     verbose=False,
     fit=False,
+    **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
     """Compute the second order structure function with Monte-Carlo error propagation.
@@ -34,6 +43,7 @@ def structure_function(
         show_plots (bool, optional): Show plots. Defaults to False.
         verbose (bool, optional): Print progress. Defaults to False.
         fit (bool, optional): Fit the structure function. Defaults to False.
+        **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
     Returns:
         Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]: 
@@ -113,30 +123,56 @@ def structure_function(
     if fit:
         if verbose:
             print("Fitting SF with a broken power law...")
-        # initialize a linear fitter
-        fitter = fitting.LevMarLSQFitter()
+        # A few simple setup steps
+        label = 'linear_regression'
+        outdir = 'outdir'
+        bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
 
         # initialize a linear model
-        line_init = models.BrokenPowerLaw1D()
+        injection_parameters = dict(amplitude=1., x_break=1., alpha_1=1., alpha_2=1)
         # Only use bins with at least 10 sources
         cut = (count >= 10) & np.isfinite(cbins) & np.isfinite(medians) & np.isfinite(err[0]) & np.isfinite(err[1])
-        x = cbins[cut].value
+        x = np.array(cbins[cut].value)
         y = medians[cut]
-        y_err = np.log(np.abs(err[1][cut] - err[0][cut]))
-        fitted_line = fitter(
-            line_init, 
-            x, 
-            y, 
-            weights=1.0/y_err
+        y_err = (per84 - per16)[cut]
+        likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
+        priors = dict()
+        priors['amplitude'] = bilby.core.prior.Uniform(y.min() - y_err.max(), y.max() + y_err.max(), 'amplitude')
+        priors['x_break'] = bilby.core.prior.Uniform(x.min(), x.max(), 'x_break')
+        priors['alpha_1'] = bilby.core.prior.Uniform(-2, 2, 'alpha_1')
+        priors['alpha_2'] = bilby.core.prior.Uniform(-2, 2, 'alpha_2')
+        result = bilby.run_sampler(
+            likelihood=likelihood, 
+            priors=priors, 
+            sample='unif', 
+            injection_parameters=injection_parameters, 
+            outdir=outdir,
+            label=label, 
+            **kwargs,
         )
-        amplitude,x_break,alpha_1,alpha_2 = fitted_line.parameters
+        if show_plots:
+            samps = result.samples
+            labels = result.parameter_labels
+            fig = plt.figure(figsize=(10, 10), facecolor='w')
+            fig = corner.corner(samps, labels=labels, fig=fig)
         if verbose:
+            amp_ps = np.nanpercentile(result.posterior['amplitude'],  [16, 50, 84])
+            break_ps = np.nanpercentile(result.posterior['x_break'],  [16, 50, 84])
+            a1_ps = np.nanpercentile(result.posterior['alpha_1'],  [16, 50, 84])
+            a2_ps = np.nanpercentile(result.posterior['alpha_2'],  [16, 50, 84])
+
+            amplitude = round(amp_ps[1], uncertainty=amp_ps[2] - amp_ps[1])
+            x_break = round(break_ps[1], uncertainty=break_ps[2] - break_ps[1])
+            alpha_1 = round(a1_ps[1], uncertainty=a1_ps[2] - a1_ps[1])
+            alpha_2 = round(a2_ps[1], uncertainty=a2_ps[2] - a2_ps[1])
+
+            print("Fitting results:")
             print(f"    Amplitude: {amplitude} [{data.unit}]")
             print(f"    Break point: {x_break} [{u.deg}]")
             print(f"    alpha 1 (theta < break): {alpha_1}")
             print(f"    alpha 2 (theta > break): {alpha_2}")
     else:
-        fitted_line = None
+        result = None
 
     ##############################################################################
 
@@ -148,7 +184,25 @@ def structure_function(
             cbins.value, medians, yerr=err, color="tab:blue", marker=None, fmt=" "
         )
         if fit:
-            plt.plot(x, fitted_line(x))
+            cbins_hi = np.logspace(np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000)
+            errmodel = []
+            # Sample the posterior randomly 1000 times
+            for i in range(1000): 
+                idx = np.random.choice(np.arange(result.posterior.shape[0]))
+                _mod = model(
+                    x=cbins_hi,
+                    amplitude=result.posterior['amplitude'][idx],
+                    x_break=result.posterior['x_break'][idx],
+                    alpha_1=result.posterior['alpha_1'][idx],
+                    alpha_2=result.posterior['alpha_2'][idx]
+
+                )
+                # errDict[name] = model_dict['posterior'][name][idx]
+                errmodel.append(_mod)
+            errmodel = np.array(errmodel)
+            low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
+            plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
+            plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
         plt.xscale("log")
         plt.yscale("log")
         # plt.legend()
@@ -196,7 +250,10 @@ def structure_function(
         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
         plt.xlim(bins[0].value, bins[-1].value)
         plt.ylim(abs(np.nanmin(medians) / 10), np.nanmax(medians) * 10)
+        if fit:
+            plt.plot(cbins_hi, med, "-", color="tab:red", label="Best fit")
+            plt.fill_between(cbins_hi, low, high, color="tab:red", alpha=0.5)
         plt.legend()
     ##############################################################################
 
-    return cbins, medians, err, count
+    return cbins, medians, err, count, result
