@@ -27,6 +27,7 @@ def structure_function(
     show_plots=False,
     verbose=False,
     fit=False,
+    outdir=None,
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
@@ -41,6 +42,7 @@ def structure_function(
         show_plots (bool, optional): Show plots. Defaults to False.
         verbose (bool, optional): Print progress. Defaults to False.
         fit (bool, optional): Fit the structure function. Defaults to False.
+        outdir (str, optional): Output directory for bilby. Defaults to None.
         **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
     Returns:
@@ -123,7 +125,8 @@ def structure_function(
             print("Fitting SF with a broken power law...")
         # A few simple setup steps
         label = 'linear_regression'
-        outdir = 'outdir'
+        if outdir is None:
+            outdir = 'outdir'
         bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
 
         # initialize a linear model
