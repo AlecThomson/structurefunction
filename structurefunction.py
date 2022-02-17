@@ -5,6 +5,11 @@ import astropy.units as u
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import itertools
+import warnings
+from astropy.modeling import models, fitting
+warnings.filterwarnings('ignore', message='All-NaN slice encountered')
+warnings.filterwarnings('ignore', message='All-NaN axis encountered')
+warnings.filterwarnings('ignore', message='Mean of empty slice')
 
 
 def structure_function(
@@ -15,6 +20,7 @@ def structure_function(
     bins: u.Quantity,
     show_plots=False,
     verbose=False,
+    fit=False,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
     """Compute the second order structure function with Monte-Carlo error propagation.
@@ -26,6 +32,8 @@ def structure_function(
         samples (int): Number of samples to use for Monte-Carlo error propagation.
         bins (u.Quantity): Bin edges of the structure function.
         show_plots (bool, optional): Show plots. Defaults to False.
+        verbose (bool, optional): Print progress. Defaults to False.
+        fit (bool, optional): Fit the structure function. Defaults to False.
 
     Returns:
         Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]: 
@@ -81,20 +89,17 @@ def structure_function(
     d_sf_dists = np.zeros((len(bins) - 1, samples)) * np.nan
     count = np.zeros((len(bins) - 1)) * np.nan
     cbins = np.zeros((len(bins) - 1)) * np.nan * u.deg
-    for i, b in enumerate(tqdm(bins, disable=not verbose)):
-        if i + 1 == len(bins):
-            break
-        else:
-            bin_idx = (bins[i] <= dtheta) & (dtheta < bins[i + 1])
-            centre = (bins[i] + bins[i + 1]) / 2
+    for i, b in enumerate(tqdm(bins[:-1], disable=not verbose)):
+        bin_idx = (bins[i] <= dtheta) & (dtheta < bins[i + 1])
+        centre = (bins[i] + bins[i + 1]) / 2
 
-            cbins[i] = centre
-            count[i] = np.sum(bin_idx)
-            sf_dist = np.nanmean(diffs_dist[:, bin_idx], axis=1)
-            d_sf_dist = np.nanmean(d_diffs_dist[:, bin_idx], axis=1)
+        cbins[i] = centre
+        count[i] = np.sum(bin_idx)
+        sf_dist = np.nanmean(diffs_dist[:, bin_idx], axis=1)
+        d_sf_dist = np.nanmean(d_diffs_dist[:, bin_idx], axis=1)
 
-            sf_dists[i] = sf_dist
-            d_sf_dists[i] = d_sf_dist
+        sf_dists[i] = sf_dist
+        d_sf_dists[i] = d_sf_dist
 
     # Get the final SF correcting for the errors
     medians = np.nanmedian(sf_dists - d_sf_dists, axis=1)
@@ -103,6 +108,36 @@ def structure_function(
     err_low = medians - per16
     err_high = per84 - medians
     err = [err_low.astype(float), err_high.astype(float)]
+
+
+    if fit:
+        if verbose:
+            print("Fitting SF with a broken power law...")
+        # initialize a linear fitter
+        fitter = fitting.LevMarLSQFitter()
+
+        # initialize a linear model
+        line_init = models.BrokenPowerLaw1D()
+        # Only use bins with at least 10 sources
+        cut = (count >= 10) & np.isfinite(cbins) & np.isfinite(medians) & np.isfinite(err[0]) & np.isfinite(err[1])
+        x = cbins[cut].value
+        y = medians[cut]
+        y_err = np.log(np.abs(err[1][cut] - err[0][cut]))
+        fitted_line = fitter(
+            line_init, 
+            x, 
+            y, 
+            weights=1.0/y_err
+        )
+        amplitude,x_break,alpha_1,alpha_2 = fitted_line.parameters
+        if verbose:
+            print(f"    Amplitude: {amplitude} [{data.unit}]")
+            print(f"    Break point: {x_break} [{u.deg}]")
+            print(f"    alpha 1 (theta < break): {alpha_1}")
+            print(f"    alpha 2 (theta > break): {alpha_2}")
+    else:
+        fitted_line = None
+
     ##############################################################################
 
     ##############################################################################
@@ -112,14 +147,13 @@ def structure_function(
         plt.errorbar(
             cbins.value, medians, yerr=err, color="tab:blue", marker=None, fmt=" "
         )
+        if fit:
+            plt.plot(x, fitted_line(x))
         plt.xscale("log")
         plt.yscale("log")
         # plt.legend()
         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
-        spec = cbins ** (2 / 3)
-        spec = spec / np.nanmax(spec) * np.nanmax(medians)
-        plt.plot(cbins, spec, "--", label="Kolmogorov")
         plt.xlim(bins[0].value, bins[-1].value)
         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
         plt.legend()
@@ -152,13 +186,12 @@ def structure_function(
         y = c_hbins
         X, Y = np.meshgrid(x, y)
         plt.figure(figsize=(7, 6), facecolor="w")
-        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r)
+        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r, shading='auto')
         plt.colorbar()
         plt.xticks(x)
         plt.yticks(y)
         plt.xscale("log")
         plt.yscale("log")
-        plt.plot(cbins, spec, "--", label="Kolmogorov")
         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
         plt.xlim(bins[0].value, bins[-1].value)
