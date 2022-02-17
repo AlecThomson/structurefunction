@@ -9,14 +9,17 @@ import warnings
 import bilby
 from sigfig import round
 import corner
-warnings.filterwarnings('ignore', message='All-NaN slice encountered')
-warnings.filterwarnings('ignore', message='All-NaN axis encountered')
-warnings.filterwarnings('ignore', message='Mean of empty slice')
+
+warnings.filterwarnings("ignore", message="All-NaN slice encountered")
+warnings.filterwarnings("ignore", message="All-NaN axis encountered")
+warnings.filterwarnings("ignore", message="Mean of empty slice")
+
 
 def model(x, amplitude, x_break, alpha_1, alpha_2):
     alpha = np.where(x < x_break, alpha_1, alpha_2)
     xx = x / x_break
-    return amplitude * np.power(xx,-alpha)
+    return amplitude * np.power(xx, -alpha)
+
 
 def structure_function(
     data: u.Quantity,
@@ -119,48 +122,55 @@ def structure_function(
     err_high = per84 - medians
     err = [err_low.astype(float), err_high.astype(float)]
 
-
     if fit:
         if verbose:
             print("Fitting SF with a broken power law...")
         # A few simple setup steps
-        label = 'linear_regression'
+        label = "linear_regression"
         if outdir is None:
-            outdir = 'outdir'
+            outdir = "outdir"
         bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
 
         # initialize a linear model
-        injection_parameters = dict(amplitude=1., x_break=1., alpha_1=1., alpha_2=1)
+        injection_parameters = dict(amplitude=1.0, x_break=1.0, alpha_1=1.0, alpha_2=1)
         # Only use bins with at least 10 sources
-        cut = (count >= 10) & np.isfinite(cbins) & np.isfinite(medians) & np.isfinite(err[0]) & np.isfinite(err[1])
+        cut = (
+            (count >= 10)
+            & np.isfinite(cbins)
+            & np.isfinite(medians)
+            & np.isfinite(err[0])
+            & np.isfinite(err[1])
+        )
         x = np.array(cbins[cut].value)
         y = medians[cut]
         y_err = (per84 - per16)[cut]
         likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
         priors = dict()
-        priors['amplitude'] = bilby.core.prior.Uniform(y.min() - y_err.max(), y.max() + y_err.max(), 'amplitude')
-        priors['x_break'] = bilby.core.prior.Uniform(x.min(), x.max(), 'x_break')
-        priors['alpha_1'] = bilby.core.prior.Uniform(-2, 2, 'alpha_1')
-        priors['alpha_2'] = bilby.core.prior.Uniform(-2, 2, 'alpha_2')
+        priors["amplitude"] = bilby.core.prior.Uniform(
+            y.min() - y_err.max(), y.max() + y_err.max(), "amplitude"
+        )
+        priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break")
+        priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1")
+        priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2")
         result = bilby.run_sampler(
-            likelihood=likelihood, 
-            priors=priors, 
-            sample='unif', 
-            injection_parameters=injection_parameters, 
+            likelihood=likelihood,
+            priors=priors,
+            sample="unif",
+            injection_parameters=injection_parameters,
             outdir=outdir,
-            label=label, 
+            label=label,
             **kwargs,
         )
         if show_plots:
             samps = result.samples
             labels = result.parameter_labels
-            fig = plt.figure(figsize=(10, 10), facecolor='w')
+            fig = plt.figure(figsize=(10, 10), facecolor="w")
             fig = corner.corner(samps, labels=labels, fig=fig)
         if verbose:
-            amp_ps = np.nanpercentile(result.posterior['amplitude'],  [16, 50, 84])
-            break_ps = np.nanpercentile(result.posterior['x_break'],  [16, 50, 84])
-            a1_ps = np.nanpercentile(result.posterior['alpha_1'],  [16, 50, 84])
-            a2_ps = np.nanpercentile(result.posterior['alpha_2'],  [16, 50, 84])
+            amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
+            break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
+            a1_ps = np.nanpercentile(result.posterior["alpha_1"], [16, 50, 84])
+            a2_ps = np.nanpercentile(result.posterior["alpha_2"], [16, 50, 84])
 
             amplitude = round(amp_ps[1], uncertainty=amp_ps[2] - amp_ps[1])
             x_break = round(break_ps[1], uncertainty=break_ps[2] - break_ps[1])
@@ -185,18 +195,19 @@ def structure_function(
             cbins.value, medians, yerr=err, color="tab:blue", marker=None, fmt=" "
         )
         if fit:
-            cbins_hi = np.logspace(np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000)
+            cbins_hi = np.logspace(
+                np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
+            )
             errmodel = []
             # Sample the posterior randomly 1000 times
-            for i in range(1000): 
+            for i in range(1000):
                 idx = np.random.choice(np.arange(result.posterior.shape[0]))
                 _mod = model(
                     x=cbins_hi,
-                    amplitude=result.posterior['amplitude'][idx],
-                    x_break=result.posterior['x_break'][idx],
-                    alpha_1=result.posterior['alpha_1'][idx],
-                    alpha_2=result.posterior['alpha_2'][idx]
-
+                    amplitude=result.posterior["amplitude"][idx],
+                    x_break=result.posterior["x_break"][idx],
+                    alpha_1=result.posterior["alpha_1"][idx],
+                    alpha_2=result.posterior["alpha_2"][idx],
                 )
                 # errDict[name] = model_dict['posterior'][name][idx]
                 errmodel.append(_mod)
@@ -204,6 +215,16 @@ def structure_function(
             low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
+
+        saturate = np.var(data) * 2
+        plt.hlines(
+            saturate,
+            cbins.value.min(),
+            cbins.value.max(),
+            linestyle="--",
+            color="tab:red",
+            label="Expected saturation ($2\sigma^2$)",
+        )
         plt.xscale("log")
         plt.yscale("log")
         # plt.legend()
@@ -241,7 +262,7 @@ def structure_function(
         y = c_hbins
         X, Y = np.meshgrid(x, y)
         plt.figure(figsize=(7, 6), facecolor="w")
-        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r, shading='auto')
+        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r, shading="auto")
         plt.colorbar()
         plt.xticks(x)
         plt.yticks(y)
