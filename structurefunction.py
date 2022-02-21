@@ -1,3 +1,4 @@
+import os
 from typing import Tuple
 import numpy as np
 from astropy.coordinates import SkyCoord
@@ -27,10 +28,11 @@ def structure_function(
     coords: SkyCoord,
     samples: int,
     bins: u.Quantity,
-    show_plots=False,
-    verbose=False,
-    fit=False,
-    outdir=None,
+    show_plots: bool = False,
+    save_plots: bool = False,
+    verbose: bool = False,
+    fit: bool = False,
+    outdir: str = None,
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
@@ -62,8 +64,12 @@ def structure_function(
     rm_dist = []
     d_rm_dist = []
     for i in tqdm(range(data.shape[0]), "Sample Gaussian", disable=not verbose):
-        rm_dist.append(np.random.normal(loc=data[i], scale=errors[i], size=samples))
-        d_rm_dist.append(np.random.normal(loc=errors[i], scale=errors[i], size=samples))
+        rm_dist.append(
+            np.random.normal(loc=data[i].value, scale=errors[i].value, size=samples)
+        )
+        d_rm_dist.append(
+            np.random.normal(loc=errors[i].value, scale=errors[i].value, size=samples)
+        )
     rm_dist = np.array(rm_dist)
     d_rm_dist = np.array(d_rm_dist)
 
@@ -81,7 +87,7 @@ def structure_function(
 
     d_diffs_dist = ((dF_dist[:, 0] - dF_dist[:, 1]) ** 2).T
 
-    # Get the angular separation of the source paris
+    # Get the angular separation of the source pairs
     if verbose:
         print("Getting angular separations...")
     cx_ra_perm, cy_ra_perm = np.array(
@@ -120,7 +126,7 @@ def structure_function(
     per84 = np.nanpercentile(sf_dists - d_sf_dists, 84, axis=1)
     err_low = medians - per16
     err_high = per84 - medians
-    err = [err_low.astype(float), err_high.astype(float)]
+    err = np.array([err_low.astype(float), err_high.astype(float)])
 
     if fit:
         if verbose:
@@ -166,6 +172,8 @@ def structure_function(
             labels = result.parameter_labels
             fig = plt.figure(figsize=(10, 10), facecolor="w")
             fig = corner.corner(samps, labels=labels, fig=fig)
+            if save_plots:
+                plt.savefig(os.path.join(outdir, "corner.pdf"))
         if verbose:
             amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
             break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
@@ -189,10 +197,37 @@ def structure_function(
 
     ##############################################################################
     if show_plots:
+        good_idx = count >= 10
         plt.figure(figsize=(6, 6), facecolor="w")
-        plt.plot(cbins, medians, ".", label="Median from MC")
+        plt.plot(
+            cbins[good_idx],
+            medians[good_idx],
+            ".",
+            c="tab:blue",
+            label="Reliable bins (>= 10 source pairs)",
+        )
+        plt.plot(
+            cbins[~good_idx],
+            medians[~good_idx],
+            ".",
+            c="tab:red",
+            label="Unreliable bins (< 10 source pairs)",
+        )
         plt.errorbar(
-            cbins.value, medians, yerr=err, color="tab:blue", marker=None, fmt=" "
+            cbins.value[good_idx],
+            medians[good_idx],
+            yerr=err[:,good_idx],
+            color="tab:blue",
+            marker=None,
+            fmt=" ",
+        )
+        plt.errorbar(
+            cbins.value[~good_idx],
+            medians[~good_idx],
+            yerr=err[:,~good_idx],
+            color="tab:red",
+            marker=None,
+            fmt=" ",
         )
         if fit:
             cbins_hi = np.logspace(
@@ -233,6 +268,8 @@ def structure_function(
         plt.xlim(bins[0].value, bins[-1].value)
         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
         plt.legend()
+        if save_plots:
+            plt.savefig(os.path.join(outdir, "errorbar.pdf"))
 
         plt.figure(figsize=(6, 6), facecolor="w")
         plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
@@ -241,6 +278,8 @@ def structure_function(
         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
         plt.ylabel(r"Number of source pairs")
         plt.xlim(bins[0].value, bins[-1].value)
+        if save_plots:
+            plt.savefig(os.path.join(outdir, "counts.pdf"))
 
         counts = []
         cor_dists = sf_dists - d_sf_dists
@@ -276,6 +315,16 @@ def structure_function(
             plt.plot(cbins_hi, med, "-", color="tab:red", label="Best fit")
             plt.fill_between(cbins_hi, low, high, color="tab:red", alpha=0.5)
         plt.legend()
+        plt.hlines(
+            saturate,
+            cbins.value.min(),
+            cbins.value.max(),
+            linestyle="--",
+            color="tab:red",
+            label="Expected saturation ($2\sigma^2$)",
+        )
+        if save_plots:
+            plt.savefig(os.path.join(outdir, "PDF.pdf"))
     ##############################################################################
 
     return cbins, medians, err, count, result
