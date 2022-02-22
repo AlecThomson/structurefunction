@@ -10,6 +10,11 @@ import warnings
 import bilby
 from sigfig import round
 import corner
+from astropy.visualization import quantity_support
+from astropy.modeling import models, fitting
+import pandas as pd
+
+quantity_support()
 
 warnings.filterwarnings("ignore", message="All-NaN slice encountered")
 warnings.filterwarnings("ignore", message="All-NaN axis encountered")
@@ -22,16 +27,91 @@ def model(x, amplitude, x_break, alpha_1, alpha_2):
     return amplitude * np.power(xx, -alpha)
 
 
+def astropy_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+    result = bilby.core.result.Result(label=label, outdir=outdir)
+    fitter = fitting.LevMarLSQFitter()
+
+    # initialize a linear model
+    line_init = models.BrokenPowerLaw1D()
+    fitted_line = fitter(line_init, x, y, weights=1.0 / y_err ** 2)
+    amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
+    posterior = {
+        "amplitude": amplitude,
+        "x_break": x_break,
+        "alpha_1": alpha_1,
+        "alpha_2": alpha_2,
+    }
+    result.posterior = pd.DataFrame(posterior, index=[0])
+    result.parameter_labels = list(posterior.keys())
+    result.samples = np.array(list(posterior.values())).T[np.newaxis, :]
+    print(f"{result.samples.shape=}")
+    return result
+
+
+def astropy_fit_mc(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+    result = bilby.core.result.Result(label=label, outdir=outdir)
+    fitter = fitting.LevMarLSQFitter()
+
+    posterior = {
+        "amplitude": [],
+        "x_break": [],
+        "alpha_1": [],
+        "alpha_2": [],
+    }
+    # initialize a linear model
+    line_init = models.BrokenPowerLaw1D()
+
+    # loop over the samples
+    print(f"{x.shape=}")
+    print(f"{y_dist.T.shape=}")
+    for y in tqdm(y_dist.T, disable=not verbose, desc="Fitting"):
+        fitted_line = fitter(line_init, x, y)
+        amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
+        posterior["amplitude"].append(amplitude)
+        posterior["x_break"].append(x_break)
+        posterior["alpha_1"].append(alpha_1)
+        posterior["alpha_2"].append(alpha_2)
+    result.posterior = pd.DataFrame.from_dict(posterior)
+    result.parameter_labels = list(posterior.keys())
+    result.samples = np.array(list(posterior.values())).T
+    print(f"{result.samples.shape=}")
+    return result
+
+
+def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+    # initialize a linear model
+    injection_parameters = dict(amplitude=1.0, x_break=1.0, alpha_1=1.0, alpha_2=1)
+    likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
+    priors = dict()
+    priors["amplitude"] = bilby.core.prior.Uniform(
+        y.min() - y_err.max(), y.max() + y_err.max(), "amplitude"
+    )
+    priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break")
+    priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1")
+    priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2")
+    result = bilby.run_sampler(
+        likelihood=likelihood,
+        priors=priors,
+        sample="unif",
+        injection_parameters=injection_parameters,
+        outdir=outdir,
+        label=label,
+        **kwargs,
+    )
+    return result
+
+
 def structure_function(
     data: u.Quantity,
     errors: u.Quantity,
     coords: SkyCoord,
     samples: int,
     bins: u.Quantity,
+    weights: np.ndarray = None,
     show_plots: bool = False,
     save_plots: bool = False,
     verbose: bool = False,
-    fit: bool = False,
+    fit: str = None,
     outdir: str = None,
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
@@ -77,15 +157,32 @@ def structure_function(
     if verbose:
         print("Getting data differences...")
     F_dist = np.array(list(itertools.combinations(rm_dist, r=2)))
-
-    diffs_dist = ((F_dist[:, 0] - F_dist[:, 1]) ** 2).T
+    if weights is None:
+        weights = np.ones(data.shape[0])
+    w_dist = np.array(list(itertools.combinations(weights, r=2)))
+    # F_dist *= w_dist[:,:,np.newaxis]
+    diffs_dist = np.transpose(
+        np.power(
+            # (F_dist[:, 0] - F_dist[:, 1]),
+            np.subtract(F_dist[:, 0], F_dist[:, 1]),
+            #/ np.sum(w_dist, axis=1)[:, np.newaxis],
+            2,
+        )
+    )
 
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
     dF_dist = np.array(list(itertools.combinations(d_rm_dist, r=2)))
-
-    d_diffs_dist = ((dF_dist[:, 0] - dF_dist[:, 1]) ** 2).T
+    # dF_dist *= w_dist[:,:,np.newaxis]
+    d_diffs_dist = np.transpose(
+        np.power(
+            # (dF_dist[:, 0] - dF_dist[:, 1]),
+            np.subtract(dF_dist[:, 0], dF_dist[:, 1]),
+            #/ np.sum(w_dist, axis=1)[:, np.newaxis],
+            2,
+        )
+    )
 
     # Get the angular separation of the source pairs
     if verbose:
@@ -98,7 +195,6 @@ def structure_function(
     ).T
     coords_x = SkyCoord(cx_ra_perm * u.deg, cx_dec_perm * u.deg)
     coords_y = SkyCoord(cy_ra_perm * u.deg, cy_dec_perm * u.deg)
-    dtheta = coords_x.separation(coords_y)
     dtheta = coords_x.separation(coords_y)
 
     # Compute the SF
@@ -114,16 +210,17 @@ def structure_function(
 
         cbins[i] = centre
         count[i] = np.sum(bin_idx)
-        sf_dist = np.nanmean(diffs_dist[:, bin_idx], axis=1)
-        d_sf_dist = np.nanmean(d_diffs_dist[:, bin_idx], axis=1)
+        sf_dist = np.average(diffs_dist[:, bin_idx], axis=1,)
+        d_sf_dist = np.average(d_diffs_dist[:, bin_idx], axis=1,)
 
         sf_dists[i] = sf_dist
         d_sf_dists[i] = d_sf_dist
 
     # Get the final SF correcting for the errors
-    medians = np.nanmedian(sf_dists - d_sf_dists, axis=1)
-    per16 = np.nanpercentile(sf_dists - d_sf_dists, 16, axis=1)
-    per84 = np.nanpercentile(sf_dists - d_sf_dists, 84, axis=1)
+    sf_dists_cor = sf_dists - d_sf_dists
+    medians = np.nanmedian(sf_dists_cor, axis=1)
+    per16 = np.nanpercentile(sf_dists_cor, 16, axis=1)
+    per84 = np.nanpercentile(sf_dists_cor, 84, axis=1)
     err_low = medians - per16
     err_high = per84 - medians
     err = np.array([err_low.astype(float), err_high.astype(float)])
@@ -137,8 +234,6 @@ def structure_function(
             outdir = "outdir"
         bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
 
-        # initialize a linear model
-        injection_parameters = dict(amplitude=1.0, x_break=1.0, alpha_1=1.0, alpha_2=1)
         # Only use bins with at least 10 sources
         cut = (
             (count >= 10)
@@ -149,25 +244,19 @@ def structure_function(
         )
         x = np.array(cbins[cut].value)
         y = medians[cut]
-        y_err = (per84 - per16)[cut]
-        likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
-        priors = dict()
-        priors["amplitude"] = bilby.core.prior.Uniform(
-            y.min() - y_err.max(), y.max() + y_err.max(), "amplitude"
-        )
-        priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break")
-        priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1")
-        priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2")
-        result = bilby.run_sampler(
-            likelihood=likelihood,
-            priors=priors,
-            sample="unif",
-            injection_parameters=injection_parameters,
-            outdir=outdir,
-            label=label,
-            **kwargs,
-        )
-        if show_plots:
+        y_err = (per84 - per16)[cut] / 2
+        y_dist = sf_dists_cor[cut]
+
+        if fit == "astropy":
+            fit_func = astropy_fit
+        elif fit == "astropy_mc":
+            fit_func = astropy_fit_mc
+        elif fit == "bilby":
+            fit_func = bilby_fit
+        else:
+            raise ValueError("Invalid fit type")
+        result = fit_func(x, y, y_err, y_dist, outdir, label, verbose=verbose)
+        if show_plots and fit != "astropy":
             samps = result.samples
             labels = result.parameter_labels
             fig = plt.figure(figsize=(10, 10), facecolor="w")
@@ -186,7 +275,7 @@ def structure_function(
             alpha_2 = round(a2_ps[1], uncertainty=a2_ps[2] - a2_ps[1])
 
             print("Fitting results:")
-            print(f"    Amplitude: {amplitude} [{data.unit}]")
+            print(f"    Amplitude: {amplitude} [{data.unit**2}]")
             print(f"    Break point: {x_break} [{u.deg}]")
             print(f"    alpha 1 (theta < break): {alpha_1}")
             print(f"    alpha 2 (theta > break): {alpha_2}")
@@ -216,7 +305,7 @@ def structure_function(
         plt.errorbar(
             cbins.value[good_idx],
             medians[good_idx],
-            yerr=err[:,good_idx],
+            yerr=err[:, good_idx],
             color="tab:blue",
             marker=None,
             fmt=" ",
@@ -224,7 +313,7 @@ def structure_function(
         plt.errorbar(
             cbins.value[~good_idx],
             medians[~good_idx],
-            yerr=err[:,~good_idx],
+            yerr=err[:, ~good_idx],
             color="tab:red",
             marker=None,
             fmt=" ",
@@ -234,7 +323,7 @@ def structure_function(
                 np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
             )
             errmodel = []
-            # Sample the posterior randomly 1000 times
+            # Sample the posterior randomly 100 times
             for i in range(1000):
                 idx = np.random.choice(np.arange(result.posterior.shape[0]))
                 _mod = model(
@@ -248,6 +337,7 @@ def structure_function(
                 errmodel.append(_mod)
             errmodel = np.array(errmodel)
             low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
+            # med = fitted_line(cbins_hi)
             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
 
@@ -269,7 +359,7 @@ def structure_function(
         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
         plt.legend()
         if save_plots:
-            plt.savefig(os.path.join(outdir, "errorbar.pdf"))
+            plt.savefig(os.path.join(outdir, "errorbar.png"))
 
         plt.figure(figsize=(6, 6), facecolor="w")
         plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
@@ -279,7 +369,7 @@ def structure_function(
         plt.ylabel(r"Number of source pairs")
         plt.xlim(bins[0].value, bins[-1].value)
         if save_plots:
-            plt.savefig(os.path.join(outdir, "counts.pdf"))
+            plt.savefig(os.path.join(outdir, "counts.png"))
 
         counts = []
         cor_dists = sf_dists - d_sf_dists
@@ -313,7 +403,7 @@ def structure_function(
         plt.ylim(abs(np.nanmin(medians) / 10), np.nanmax(medians) * 10)
         if fit:
             plt.plot(cbins_hi, med, "-", color="tab:red", label="Best fit")
-            plt.fill_between(cbins_hi, low, high, color="tab:red", alpha=0.5)
+            # plt.fill_between(cbins_hi, low, high, color="tab:red", alpha=0.5)
         plt.legend()
         plt.hlines(
             saturate,
@@ -324,7 +414,7 @@ def structure_function(
             label="Expected saturation ($2\sigma^2$)",
         )
         if save_plots:
-            plt.savefig(os.path.join(outdir, "PDF.pdf"))
+            plt.savefig(os.path.join(outdir, "PDF.png"))
     ##############################################################################
 
     return cbins, medians, err, count, result
