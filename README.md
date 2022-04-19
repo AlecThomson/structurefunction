@@ -8,7 +8,7 @@ I follow the definitions laid out by [Haverkorn et al. 2004](https://ui.adsabs.h
 
 The second-order structure function of RM is given by:
 
-<img src="https://render.githubusercontent.com/render/math?math=SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}(\theta + \delta\theta)]^2\rangle">
+<img src="https://render.githubusercontent.com/render/math?math=SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}{(\theta + \delta\theta)}]^2\rangle">
 
 That is, the ensemble average of the squared-difference in RM for sources with angular seperation $\delta\theta$. We also need to correct for the impact of errors by:
 
