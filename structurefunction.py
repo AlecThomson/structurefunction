@@ -15,10 +15,13 @@ from astropy.modeling import models, fitting
 import pandas as pd
 
 quantity_support()
-
-warnings.filterwarnings("ignore", message="All-NaN slice encountered")
-warnings.filterwarnings("ignore", message="All-NaN axis encountered")
-warnings.filterwarnings("ignore", message="Mean of empty slice")
+warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore", message="All-NaN slice encountered")
+# warnings.filterwarnings("ignore", message="All-NaN axis encountered")
+# warnings.filterwarnings("ignore", message="Mean of empty slice")
+# warnings.filterwarnings("ignore", message="converting a masked element to nan")
+# warnings.filterwarnings("ignore", message="invalid value encountered in power")
+# warnings.filterwarnings("ignore", message="overflow encountered in power")
 
 
 def model(x, amplitude, x_break, alpha_1, alpha_2):
@@ -44,7 +47,6 @@ def astropy_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     result.posterior = pd.DataFrame(posterior, index=[0])
     result.parameter_labels = list(posterior.keys())
     result.samples = np.array(list(posterior.values())).T[np.newaxis, :]
-    print(f"{result.samples.shape=}")
     return result
 
 
@@ -62,8 +64,6 @@ def astropy_fit_mc(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     line_init = models.BrokenPowerLaw1D()
 
     # loop over the samples
-    print(f"{x.shape=}")
-    print(f"{y_dist.T.shape=}")
     for y in tqdm(y_dist.T, disable=not verbose, desc="Fitting"):
         fitted_line = fitter(line_init, x, y)
         amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
@@ -74,7 +74,6 @@ def astropy_fit_mc(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     result.posterior = pd.DataFrame.from_dict(posterior)
     result.parameter_labels = list(posterior.keys())
     result.samples = np.array(list(posterior.values())).T
-    print(f"{result.samples.shape=}")
     return result
 
 
@@ -126,7 +125,7 @@ def structure_function(
         bins (u.Quantity): Bin edges of the structure function.
         show_plots (bool, optional): Show plots. Defaults to False.
         verbose (bool, optional): Print progress. Defaults to False.
-        fit (bool, optional): Fit the structure function. Defaults to False.
+        fit (str, optional): How to fit the broken powerlaw. Can be 'astropy', 'astropy_mc' or 'bilby'. Defaults to None.
         outdir (str, optional): Output directory for bilby. Defaults to None.
         **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
@@ -159,30 +158,14 @@ def structure_function(
     F_dist = np.array(list(itertools.combinations(rm_dist, r=2)))
     if weights is None:
         weights = np.ones(data.shape[0])
-    w_dist = np.array(list(itertools.combinations(weights, r=2)))
-    # F_dist *= w_dist[:,:,np.newaxis]
-    diffs_dist = np.transpose(
-        np.power(
-            # (F_dist[:, 0] - F_dist[:, 1]),
-            np.subtract(F_dist[:, 0], F_dist[:, 1]),
-            #/ np.sum(w_dist, axis=1)[:, np.newaxis],
-            2,
-        )
-    )
+    w_dist = np.mean(np.array(list(itertools.combinations(weights, r=2))), axis=1)
+    diffs_dist = np.transpose(np.power(np.subtract(F_dist[:, 0], F_dist[:, 1]), 2,))
 
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
     dF_dist = np.array(list(itertools.combinations(d_rm_dist, r=2)))
-    # dF_dist *= w_dist[:,:,np.newaxis]
-    d_diffs_dist = np.transpose(
-        np.power(
-            # (dF_dist[:, 0] - dF_dist[:, 1]),
-            np.subtract(dF_dist[:, 0], dF_dist[:, 1]),
-            #/ np.sum(w_dist, axis=1)[:, np.newaxis],
-            2,
-        )
-    )
+    d_diffs_dist = np.transpose(np.power(np.subtract(dF_dist[:, 0], dF_dist[:, 1]), 2,))
 
     # Get the angular separation of the source pairs
     if verbose:
@@ -210,11 +193,17 @@ def structure_function(
 
         cbins[i] = centre
         count[i] = np.sum(bin_idx)
-        sf_dist = np.average(diffs_dist[:, bin_idx], axis=1,)
-        d_sf_dist = np.average(d_diffs_dist[:, bin_idx], axis=1,)
-
-        sf_dists[i] = sf_dist
-        d_sf_dists[i] = d_sf_dist
+        try:
+            sf_dist = np.average(
+                diffs_dist[:, bin_idx], axis=1, weights=w_dist[bin_idx]
+            )
+            d_sf_dist = np.average(
+                d_diffs_dist[:, bin_idx], axis=1, weights=w_dist[bin_idx]
+            )
+            sf_dists[i] = sf_dist
+            d_sf_dists[i] = d_sf_dist
+        except ZeroDivisionError:
+            continue
 
     # Get the final SF correcting for the errors
     sf_dists_cor = sf_dists - d_sf_dists
@@ -255,7 +244,7 @@ def structure_function(
             fit_func = bilby_fit
         else:
             raise ValueError("Invalid fit type")
-        result = fit_func(x, y, y_err, y_dist, outdir, label, verbose=verbose)
+        result = fit_func(x, y, y_err, y_dist, outdir, label, verbose=verbose, **kwargs)
         if show_plots and fit != "astropy":
             samps = result.samples
             labels = result.parameter_labels
@@ -269,10 +258,16 @@ def structure_function(
             a1_ps = np.nanpercentile(result.posterior["alpha_1"], [16, 50, 84])
             a2_ps = np.nanpercentile(result.posterior["alpha_2"], [16, 50, 84])
 
-            amplitude = round(amp_ps[1], uncertainty=amp_ps[2] - amp_ps[1])
-            x_break = round(break_ps[1], uncertainty=break_ps[2] - break_ps[1])
-            alpha_1 = round(a1_ps[1], uncertainty=a1_ps[2] - a1_ps[1])
-            alpha_2 = round(a2_ps[1], uncertainty=a2_ps[2] - a2_ps[1])
+            amplitude = amp_ps[1]
+            x_break = break_ps[1]
+            alpha_1 = a1_ps[1]
+            alpha_2 = a2_ps[1]
+
+            if fit != "astropy": 
+                amplitude = round(amplitude, uncertainty=amp_ps[2] - amp_ps[1])
+                x_break = round(x_break, uncertainty=break_ps[2] - break_ps[1])
+                alpha_1 = round(alpha_1, uncertainty=a1_ps[2] - a1_ps[1])
+                alpha_2 = round(alpha_2, uncertainty=a2_ps[2] - a2_ps[1])
 
             print("Fitting results:")
             print(f"    Amplitude: {amplitude} [{data.unit**2}]")
@@ -387,7 +382,7 @@ def structure_function(
         counts = np.array(counts)
         c_hbins = np.array(c_hbins)
 
-        x = bins.value
+        x = cbins
         y = c_hbins
         X, Y = np.meshgrid(x, y)
         plt.figure(figsize=(7, 6), facecolor="w")
@@ -402,8 +397,8 @@ def structure_function(
         plt.xlim(bins[0].value, bins[-1].value)
         plt.ylim(abs(np.nanmin(medians) / 10), np.nanmax(medians) * 10)
         if fit:
-            plt.plot(cbins_hi, med, "-", color="tab:red", label="Best fit")
-            # plt.fill_between(cbins_hi, low, high, color="tab:red", alpha=0.5)
+            plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
+            plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
         plt.legend()
         plt.hlines(
             saturate,
