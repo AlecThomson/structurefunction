@@ -14,9 +14,9 @@ from setuptools import find_packages, setup, Command
 # Package meta-data.
 NAME = 'structurefunction'
 DESCRIPTION = 'Compute the second-order structure function'
-URL = 'https://github.com/AlecThomson/structurefunctiont'
+URL = 'https://github.com/AlecThomson/structurefunction'
 EMAIL = 'alec.thomson@csiro.au'
-AUTHOR = 'Awesome Soul'
+AUTHOR = 'Alec Thomson'
 REQUIRES_PYTHON = '>=3.6.0'
 VERSION = '0.1.0'
 
