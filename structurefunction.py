@@ -156,27 +156,106 @@ def structure_function(
     # Get all combinations of sources and compute the difference
     if verbose:
         print("Getting data differences...")
-    F_dist = np.array(list(itertools.combinations(rm_dist, r=2)))
+    # F_dist = np.array(
+    #     list(
+    #         itertools.combinations(
+    #             rm_dist, 
+    #             r=2
+    #         )
+    #     )
+    # )
+    F_dist = rm_dist[
+        np.array(
+            np.triu_indices(
+                rm_dist.shape[0], 
+                k=1
+            )
+        ).swapaxes(0, 1)
+    ]
     if weights is None:
         weights = np.ones(data.shape[0])
-    w_dist = np.mean(np.array(list(itertools.combinations(weights, r=2))), axis=1)
-    diffs_dist = np.transpose(np.subtract(F_dist[:, 0], F_dist[:, 1])**2)
+    # w_dist = np.mean(
+    #     np.array(
+    #             list(
+    #                 itertools.combinations(
+    #                     weights, 
+    #                     r=2
+    #                 )
+    #             )
+    #         ), 
+    #     axis=1
+    # )
+    w_dist = np.mean(
+            weights[
+            np.array(
+                np.triu_indices(
+                    weights.shape[0], 
+                    k=1
+                )
+            ).swapaxes(0, 1)
+        ],
+        axis=1,
+    )
+
+    diffs_dist = np.transpose((F_dist[:, 0] - F_dist[:, 1])**2)
 
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
-    dF_dist = np.array(list(itertools.combinations(d_rm_dist, r=2)))
-    d_diffs_dist = np.transpose(np.subtract(dF_dist[:, 0], dF_dist[:, 1])**2)
+    # dF_dist = np.array(
+    #     list(
+    #         itertools.combinations(
+    #             d_rm_dist, 
+    #             r=2
+    #         )
+    #     )
+    # )
+    dF_dist = d_rm_dist[
+        np.array(
+            np.triu_indices(
+                d_rm_dist.shape[0],
+                k=1
+            )
+        ).swapaxes(0,1)
+    ]
+    d_diffs_dist = np.transpose((dF_dist[:, 0] - dF_dist[:, 1])**2)
 
     # Get the angular separation of the source pairs
     if verbose:
         print("Getting angular separations...")
-    cx_ra_perm, cy_ra_perm = np.array(
-        list(itertools.combinations(coords.ra.to(u.deg).value, r=2))
-    ).T
-    cx_dec_perm, cy_dec_perm = np.array(
-        list(itertools.combinations(coords.dec.to(u.deg).value, r=2))
-    ).T
+    # cx_ra_perm, cy_ra_perm = np.array(
+    #     list(
+    #         itertools.combinations(
+    #                 coords.ra.to(u.deg).value, 
+    #                 r=2
+    #             )
+    #         )
+    # ).T
+    cx_ra_perm, cy_ra_perm = coords.ra.to(u.deg).value[
+        np.array(
+            np.triu_indices(
+                coords.ra.to(u.deg).value.shape[0],
+                k=1
+            )
+        ).swapaxes(0,1)
+    ].T
+    # cx_dec_perm, cy_dec_perm = np.array(
+    #     list(
+    #         itertools.combinations(
+    #                 coords.dec.to(u.deg).value, 
+    #                 r=2
+    #             )
+    #         )
+    # ).T
+    cx_dec_perm, cy_dec_perm = coords.dec.to(u.deg).value[
+        np.array(
+            np.triu_indices(
+                coords.dec.to(u.deg).value.shape[0],
+                k=1
+            )
+        ).swapaxes(0,1)
+    ].T
+
     coords_x = SkyCoord(cx_ra_perm * u.deg, cx_dec_perm * u.deg)
     coords_y = SkyCoord(cy_ra_perm * u.deg, cy_dec_perm * u.deg)
     dtheta = coords_x.separation(coords_y)
