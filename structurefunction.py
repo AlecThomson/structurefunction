@@ -1,5 +1,5 @@
 import os
-from typing import Tuple
+from typing import Tuple, Union
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -105,7 +105,7 @@ def structure_function(
     errors: u.Quantity,
     coords: SkyCoord,
     samples: int,
-    bins: u.Quantity,
+    bins: Union[u.Quantity, int],
     weights: np.ndarray = None,
     show_plots: bool = False,
     save_plots: bool = False,
@@ -115,6 +115,7 @@ def structure_function(
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
+
     """Compute the second order structure function with Monte-Carlo error propagation.
 
     Args:
@@ -122,7 +123,7 @@ def structure_function(
         errors (u.Quantity): 1D array of errors.
         coords (SkyCoord): 1D array of coordinates.
         samples (int): Number of samples to use for Monte-Carlo error propagation.
-        bins (u.Quantity): Bin edges of the structure function.
+        bins (Union[u.Quantity, int]): Bin edges of the structure function, or number of bins.
         show_plots (bool, optional): Show plots. Defaults to False.
         verbose (bool, optional): Print progress. Defaults to False.
         fit (str, optional): How to fit the broken powerlaw. Can be 'astropy', 'astropy_mc' or 'bilby'. Defaults to None.
@@ -159,13 +160,13 @@ def structure_function(
     if weights is None:
         weights = np.ones(data.shape[0])
     w_dist = np.mean(np.array(list(itertools.combinations(weights, r=2))), axis=1)
-    diffs_dist = np.transpose(np.power(np.subtract(F_dist[:, 0], F_dist[:, 1]), 2,))
+    diffs_dist = np.transpose(np.subtract(F_dist[:, 0], F_dist[:, 1])**2)
 
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
     dF_dist = np.array(list(itertools.combinations(d_rm_dist, r=2)))
-    d_diffs_dist = np.transpose(np.power(np.subtract(dF_dist[:, 0], dF_dist[:, 1]), 2,))
+    d_diffs_dist = np.transpose(np.subtract(dF_dist[:, 0], dF_dist[:, 1])**2)
 
     # Get the angular separation of the source pairs
     if verbose:
@@ -180,13 +181,23 @@ def structure_function(
     coords_y = SkyCoord(cy_ra_perm * u.deg, cy_dec_perm * u.deg)
     dtheta = coords_x.separation(coords_y)
 
+    # Auto compute bins
+    if type(bins) is int:
+        if verbose:
+            print("Auto-computing bins...")
+        nbins = bins
+        start = np.log10(np.min(dtheta).to(u.deg).value)
+        stop = np.log10(np.max(dtheta).to(u.deg).value)
+        bins = np.logspace(start, stop, nbins, endpoint=True)*u.deg
+    else:
+        nbins = len(bins)
     # Compute the SF
     if verbose:
         print("Computing SF...")
-    sf_dists = np.zeros((len(bins) - 1, samples)) * np.nan
-    d_sf_dists = np.zeros((len(bins) - 1, samples)) * np.nan
-    count = np.zeros((len(bins) - 1)) * np.nan
-    cbins = np.zeros((len(bins) - 1)) * np.nan * u.deg
+    sf_dists = np.zeros((nbins - 1, samples)) * np.nan
+    d_sf_dists = np.zeros((nbins - 1, samples)) * np.nan
+    count = np.zeros((nbins - 1)) * np.nan
+    cbins = np.zeros((nbins - 1)) * np.nan * u.deg
     for i, b in enumerate(tqdm(bins[:-1], disable=not verbose)):
         bin_idx = (bins[i] <= dtheta) & (dtheta < bins[i + 1])
         centre = (bins[i] + bins[i + 1]) / 2
