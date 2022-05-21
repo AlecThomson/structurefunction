@@ -156,14 +156,6 @@ def structure_function(
     # Get all combinations of sources and compute the difference
     if verbose:
         print("Getting data differences...")
-    # F_dist = np.array(
-    #     list(
-    #         itertools.combinations(
-    #             rm_dist, 
-    #             r=2
-    #         )
-    #     )
-    # )
     F_dist = rm_dist[
         np.array(
             np.triu_indices(
@@ -174,17 +166,6 @@ def structure_function(
     ]
     if weights is None:
         weights = np.ones(data.shape[0])
-    # w_dist = np.mean(
-    #     np.array(
-    #             list(
-    #                 itertools.combinations(
-    #                     weights, 
-    #                     r=2
-    #                 )
-    #             )
-    #         ), 
-    #     axis=1
-    # )
     w_dist = np.mean(
             weights[
             np.array(
@@ -202,14 +183,6 @@ def structure_function(
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
-    # dF_dist = np.array(
-    #     list(
-    #         itertools.combinations(
-    #             d_rm_dist, 
-    #             r=2
-    #         )
-    #     )
-    # )
     dF_dist = d_rm_dist[
         np.array(
             np.triu_indices(
@@ -223,14 +196,6 @@ def structure_function(
     # Get the angular separation of the source pairs
     if verbose:
         print("Getting angular separations...")
-    # cx_ra_perm, cy_ra_perm = np.array(
-    #     list(
-    #         itertools.combinations(
-    #                 coords.ra.to(u.deg).value, 
-    #                 r=2
-    #             )
-    #         )
-    # ).T
     cx_ra_perm, cy_ra_perm = coords.ra.to(u.deg).value[
         np.array(
             np.triu_indices(
@@ -239,14 +204,6 @@ def structure_function(
             )
         ).swapaxes(0,1)
     ].T
-    # cx_dec_perm, cy_dec_perm = np.array(
-    #     list(
-    #         itertools.combinations(
-    #                 coords.dec.to(u.deg).value, 
-    #                 r=2
-    #             )
-    #         )
-    # ).T
     cx_dec_perm, cy_dec_perm = coords.dec.to(u.deg).value[
         np.array(
             np.triu_indices(
