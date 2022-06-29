@@ -13,6 +13,8 @@ import corner
 from astropy.visualization import quantity_support
 from astropy.modeling import models, fitting
 import pandas as pd
+import numba as nb
+import xarray as xr
 
 quantity_support()
 warnings.filterwarnings("ignore")
@@ -99,6 +101,28 @@ def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     )
     return result
 
+def combinate(data):
+    ix, iy = np.triu_indices(
+                    data.shape[0],
+                    k=1
+                )
+    idx = np.vstack((ix,iy)).T
+    dx,dy = data[idx].swapaxes(0,1)
+    return dx,dy
+
+@nb.njit(parallel=True)
+def mc_sample(
+    data:np.ndarray, 
+    errors:np.ndarray, 
+    samples:int=1000
+):
+    data_dist = np.zeros(
+        (len(data), samples)
+    ).astype(data.dtype)
+    for i in nb.prange(data.shape[0]):
+        data_dist[i] = np.random.normal(loc=data[i], scale=errors[i], size=samples)
+    return data_dist
+
 
 def structure_function(
     data: u.Quantity,
@@ -141,81 +165,36 @@ def structure_function(
     # Sample the errors assuming a Gaussian distribution
     if verbose:
         print("Sampling errors...")
-    rm_dist = []
-    d_rm_dist = []
-    for i in tqdm(range(data.shape[0]), "Sample Gaussian", disable=not verbose):
-        rm_dist.append(
-            np.random.normal(loc=data[i].value, scale=errors[i].value, size=samples)
-        )
-        d_rm_dist.append(
-            np.random.normal(loc=errors[i].value, scale=errors[i].value, size=samples)
-        )
-    rm_dist = np.array(rm_dist)
-    d_rm_dist = np.array(d_rm_dist)
+    rm_dist = mc_sample(
+        data=data.value,
+        errors=errors.value,
+        samples=samples,
+    )
+    d_rm_dist = mc_sample(
+        data=errors.value,
+        errors=errors.value,
+        samples=samples,
+    )
 
     # Get all combinations of sources and compute the difference
     if verbose:
         print("Getting data differences...")
-    F_dist = rm_dist[
-        np.array(
-            np.triu_indices(
-                rm_dist.shape[0], 
-                k=1
-            )
-        ).swapaxes(0, 1)
-    ]
-    if weights is None:
-        weights = np.ones(data.shape[0])
-    w_dist = np.mean(
-            weights[
-            np.array(
-                np.triu_indices(
-                    weights.shape[0], 
-                    k=1
-                )
-            ).swapaxes(0, 1)
-        ],
-        axis=1,
-    )
-
-    diffs_dist = np.transpose((F_dist[:, 0] - F_dist[:, 1])**2)
+    diffs_dist = np.subtract(*combinate(rm_dist)).T**2
 
     # Get all combinations of data_errs sources and compute the difference
     if verbose:
         print("Getting data error differences...")
-    dF_dist = d_rm_dist[
-        np.array(
-            np.triu_indices(
-                d_rm_dist.shape[0],
-                k=1
-            )
-        ).swapaxes(0,1)
-    ]
-    d_diffs_dist = np.transpose((dF_dist[:, 0] - dF_dist[:, 1])**2)
+    d_diffs_dist = np.subtract(*combinate(d_rm_dist)).T**2
 
     # Get the angular separation of the source pairs
     if verbose:
         print("Getting angular separations...")
-    cx_ra_perm, cy_ra_perm = coords.ra.to(u.deg).value[
-        np.array(
-            np.triu_indices(
-                coords.ra.to(u.deg).value.shape[0],
-                k=1
-            )
-        ).swapaxes(0,1)
-    ].T
-    cx_dec_perm, cy_dec_perm = coords.dec.to(u.deg).value[
-        np.array(
-            np.triu_indices(
-                coords.dec.to(u.deg).value.shape[0],
-                k=1
-            )
-        ).swapaxes(0,1)
-    ].T
+    ra_1, ra_2 = combinate(coords.ra)
+    dec_1, dec2 = combinate(coords.dec)
 
-    coords_x = SkyCoord(cx_ra_perm * u.deg, cx_dec_perm * u.deg)
-    coords_y = SkyCoord(cy_ra_perm * u.deg, cy_dec_perm * u.deg)
-    dtheta = coords_x.separation(coords_y)
+    coords_1 = SkyCoord(ra_1, dec_1)
+    coords_2 = SkyCoord(ra_2, dec2)
+    dtheta = coords_1.separation(coords_2)
 
     # Auto compute bins
     if type(bins) is int:
@@ -230,37 +209,45 @@ def structure_function(
     # Compute the SF
     if verbose:
         print("Computing SF...")
-    sf_dists = np.zeros((nbins - 1, samples)) * np.nan
-    d_sf_dists = np.zeros((nbins - 1, samples)) * np.nan
-    count = np.zeros((nbins - 1)) * np.nan
-    cbins = np.zeros((nbins - 1)) * np.nan * u.deg
-    for i, b in enumerate(tqdm(bins[:-1], disable=not verbose)):
-        bin_idx = (bins[i] <= dtheta) & (dtheta < bins[i + 1])
-        centre = (bins[i] + bins[i + 1]) / 2
+    bins_idx = np.digitize(dtheta, bins, right=False)
+    cbins = np.sqrt(bins[1:] * bins[:-1]) # Take geometric mean of bins - assuming log
 
-        cbins[i] = centre
-        count[i] = np.sum(bin_idx)
-        try:
-            sf_dist = np.average(
-                diffs_dist[:, bin_idx], axis=1, weights=w_dist[bin_idx]
-            )
-            d_sf_dist = np.average(
-                d_diffs_dist[:, bin_idx], axis=1, weights=w_dist[bin_idx]
-            )
-            sf_dists[i] = sf_dist
-            d_sf_dists[i] = d_sf_dist
-        except ZeroDivisionError:
-            continue
+    diffs_xr = xr.Dataset(
+        dict(
+            data=(["samples", "source pair"], diffs_dist),
+            error=(["samples", "source pair"], d_diffs_dist)
+            
+        ),
+        coords = dict(
+            bins_idx=("source pair", bins_idx),
+        )
+    )
 
+    # Compute SF
+    sf_xr = diffs_xr.groupby("bins_idx").mean(dim="source pair")
+    count_xr = diffs_xr["bins_idx"].groupby("bins_idx").count()
     # Get the final SF correcting for the errors
-    sf_dists_cor = sf_dists - d_sf_dists
-    medians = np.nanmedian(sf_dists_cor, axis=1)
-    per16 = np.nanpercentile(sf_dists_cor, 16, axis=1)
-    per84 = np.nanpercentile(sf_dists_cor, 84, axis=1)
+    sf_xr_cor = sf_xr.data - sf_xr.error
+    per16_xr,medians_xr,per84_xr=sf_xr_cor.quantile(
+        (0.16,0.5,0.84),
+        dim="samples"
+    )
+    # Return to numpy arrays for use later
+    count = np.zeros_like(cbins.value)
+    medians = np.zeros_like(cbins.value)
+    per16 = np.zeros_like(cbins.value)
+    per84 = np.zeros_like(cbins.value)
+    sf_dists_cor = np.zeros((len(cbins), samples))
+    sf_dists = np.zeros((len(cbins), samples))
+    d_sf_dists = np.zeros((len(cbins), samples))
+    for arr, xarr in zip(
+        (count, medians, per16, per84, sf_dists_cor, d_sf_dists), 
+        (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
+    ):
+        arr[count_xr.coords.to_index()[:-1]] = xarr[:-1]
     err_low = medians - per16
     err_high = per84 - medians
     err = np.array([err_low.astype(float), err_high.astype(float)])
-
     if fit:
         if verbose:
             print("Fitting SF with a broken power law...")
