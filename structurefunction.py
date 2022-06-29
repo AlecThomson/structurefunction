@@ -20,7 +20,7 @@ import logging as logger
 logger.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    force=True
+    force=True,
 )
 
 quantity_support()
@@ -45,7 +45,7 @@ def astropy_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
 
     # initialize a linear model
     line_init = models.BrokenPowerLaw1D()
-    fitted_line = fitter(line_init, x, y, weights=1.0 / y_err ** 2)
+    fitted_line = fitter(line_init, x, y, weights=1.0 / y_err**2)
     amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
     posterior = {
         "amplitude": amplitude,
@@ -108,7 +108,8 @@ def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     )
     return result
 
-def combinate(data: np.ndarray)->Tuple[np.ndarray, np.ndarray]:
+
+def combinate(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Return all combinations of data with itself
 
     Args:
@@ -117,20 +118,14 @@ def combinate(data: np.ndarray)->Tuple[np.ndarray, np.ndarray]:
     Returns:
         Tuple[np.ndarray, np.ndarray]: Data_1 matched with Data_2
     """
-    ix, iy = np.triu_indices(
-                    data.shape[0],
-                    k=1
-                )
-    idx = np.vstack((ix,iy)).T
-    dx,dy = data[idx].swapaxes(0,1)
-    return dx,dy
+    ix, iy = np.triu_indices(data.shape[0], k=1)
+    idx = np.vstack((ix, iy)).T
+    dx, dy = data[idx].swapaxes(0, 1)
+    return dx, dy
+
 
 @nb.njit(parallel=True)
-def mc_sample(
-    data:np.ndarray, 
-    errors:np.ndarray, 
-    samples:int=1000
-) -> np.ndarray:
+def mc_sample(data: np.ndarray, errors: np.ndarray, samples: int = 1000) -> np.ndarray:
     """Sample errors using Monte-Carlo
     Assuming Gaussian distribution.
 
@@ -142,9 +137,7 @@ def mc_sample(
     Returns:
         np.ndarray: Sample array. Shape (len(data/errors),samples)
     """
-    data_dist = np.zeros(
-        (len(data), samples)
-    ).astype(data.dtype)
+    data_dist = np.zeros((len(data), samples)).astype(data.dtype)
     for i in nb.prange(data.shape[0]):
         data_dist[i] = np.random.normal(loc=data[i], scale=errors[i], size=samples)
     return data_dist
@@ -164,7 +157,6 @@ def structure_function(
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
-
     """Compute the second order structure function with Monte-Carlo error propagation.
 
     Args:
@@ -180,7 +172,7 @@ def structure_function(
         **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
     Returns:
-        Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]: 
+        Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
             cbins: center of bins.
             medians: median of the structure function.
             errors: upper and lower error of the structure function.
@@ -192,7 +184,7 @@ def structure_function(
             level=logger.INFO,
             format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
-            force=True
+            force=True,
         )
 
     # Sample the errors assuming a Gaussian distribution
@@ -212,12 +204,12 @@ def structure_function(
     # Get all combinations of sources and compute the difference
 
     logger.info("Getting data differences...")
-    diffs_dist = np.subtract(*combinate(rm_dist)).T**2
+    diffs_dist = np.subtract(*combinate(rm_dist)).T ** 2
 
     # Get all combinations of data_errs sources and compute the difference
 
     logger.info("Getting data error differences...")
-    d_diffs_dist = np.subtract(*combinate(d_rm_dist)).T**2
+    d_diffs_dist = np.subtract(*combinate(d_rm_dist)).T ** 2
 
     # Get the angular separation of the source pairs
 
@@ -231,29 +223,28 @@ def structure_function(
 
     # Auto compute bins
     if type(bins) is int:
-    
+
         logger.info("Auto-computing bins...")
         nbins = bins
         start = np.log10(np.min(dtheta).to(u.deg).value)
         stop = np.log10(np.max(dtheta).to(u.deg).value)
-        bins = np.logspace(start, stop, nbins, endpoint=True)*u.deg
+        bins = np.logspace(start, stop, nbins, endpoint=True) * u.deg
     else:
         nbins = len(bins)
     # Compute the SF
 
     logger.info("Computing SF...")
     bins_idx = np.digitize(dtheta, bins, right=False)
-    cbins = np.sqrt(bins[1:] * bins[:-1]) # Take geometric mean of bins - assuming log
+    cbins = np.sqrt(bins[1:] * bins[:-1])  # Take geometric mean of bins - assuming log
 
     diffs_xr = xr.Dataset(
         dict(
             data=(["samples", "source pair"], diffs_dist),
-            error=(["samples", "source pair"], d_diffs_dist)
-            
+            error=(["samples", "source pair"], d_diffs_dist),
         ),
-        coords = dict(
+        coords=dict(
             bins_idx=("source pair", bins_idx),
-        )
+        ),
     )
 
     # Compute SF
@@ -261,9 +252,8 @@ def structure_function(
     count_xr = diffs_xr["bins_idx"].groupby("bins_idx").count()
     # Get the final SF correcting for the errors
     sf_xr_cor = sf_xr.data - sf_xr.error
-    per16_xr,medians_xr,per84_xr=sf_xr_cor.quantile(
-        (0.16,0.5,0.84),
-        dim="samples"
+    per16_xr, medians_xr, per84_xr = sf_xr_cor.quantile(
+        (0.16, 0.5, 0.84), dim="samples"
     )
     # Return to numpy arrays for use later
     count = np.zeros_like(cbins.value)
@@ -274,7 +264,7 @@ def structure_function(
     sf_dists = np.zeros((len(cbins), samples))
     d_sf_dists = np.zeros((len(cbins), samples))
     for arr, xarr in zip(
-        (count, medians, per16, per84, sf_dists_cor, sf_dists, d_sf_dists), 
+        (count, medians, per16, per84, sf_dists_cor, sf_dists, d_sf_dists),
         (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
     ):
         arr[count_xr.coords.to_index()[:-1]] = xarr[:-1]
@@ -282,7 +272,6 @@ def structure_function(
     err_high = per84 - medians
     err = np.array([err_low.astype(float), err_high.astype(float)])
     if fit:
-    
         logger.info("Fitting SF with a broken power law...")
         # A few simple setup steps
         label = "linear_regression"
@@ -319,7 +308,7 @@ def structure_function(
             fig = corner.corner(samps, labels=labels, fig=fig)
             if save_plots:
                 plt.savefig(os.path.join(outdir, "corner.pdf"))
-    
+
             amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
             break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
             a1_ps = np.nanpercentile(result.posterior["alpha_1"], [16, 50, 84])
@@ -330,7 +319,7 @@ def structure_function(
             alpha_1 = a1_ps[1]
             alpha_2 = a2_ps[1]
 
-            if fit != "astropy": 
+            if fit != "astropy":
                 amplitude = round(amplitude, uncertainty=amp_ps[2] - amp_ps[1])
                 x_break = round(x_break, uncertainty=break_ps[2] - break_ps[1])
                 alpha_1 = round(alpha_1, uncertainty=a1_ps[2] - a1_ps[1])
