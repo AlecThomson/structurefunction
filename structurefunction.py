@@ -15,6 +15,13 @@ from astropy.modeling import models, fitting
 import pandas as pd
 import numba as nb
 import xarray as xr
+import logging as logger
+
+logger.basicConfig(
+    format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True
+)
 
 quantity_support()
 warnings.filterwarnings("ignore")
@@ -180,9 +187,17 @@ def structure_function(
             counts: number of source pairs in each bin.
     """
 
-    # Sample the errors assuming a Gaussian distribution
     if verbose:
-        print("Sampling errors...")
+        logger.basicConfig(
+            level=logger.INFO,
+            format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            force=True
+        )
+
+    # Sample the errors assuming a Gaussian distribution
+
+    logger.info("Sampling errors...")
     rm_dist = mc_sample(
         data=data.value,
         errors=errors.value,
@@ -195,18 +210,18 @@ def structure_function(
     )
 
     # Get all combinations of sources and compute the difference
-    if verbose:
-        print("Getting data differences...")
+
+    logger.info("Getting data differences...")
     diffs_dist = np.subtract(*combinate(rm_dist)).T**2
 
     # Get all combinations of data_errs sources and compute the difference
-    if verbose:
-        print("Getting data error differences...")
+
+    logger.info("Getting data error differences...")
     d_diffs_dist = np.subtract(*combinate(d_rm_dist)).T**2
 
     # Get the angular separation of the source pairs
-    if verbose:
-        print("Getting angular separations...")
+
+    logger.info("Getting angular separations...")
     ra_1, ra_2 = combinate(coords.ra)
     dec_1, dec2 = combinate(coords.dec)
 
@@ -216,8 +231,8 @@ def structure_function(
 
     # Auto compute bins
     if type(bins) is int:
-        if verbose:
-            print("Auto-computing bins...")
+    
+        logger.info("Auto-computing bins...")
         nbins = bins
         start = np.log10(np.min(dtheta).to(u.deg).value)
         stop = np.log10(np.max(dtheta).to(u.deg).value)
@@ -225,8 +240,8 @@ def structure_function(
     else:
         nbins = len(bins)
     # Compute the SF
-    if verbose:
-        print("Computing SF...")
+
+    logger.info("Computing SF...")
     bins_idx = np.digitize(dtheta, bins, right=False)
     cbins = np.sqrt(bins[1:] * bins[:-1]) # Take geometric mean of bins - assuming log
 
@@ -267,8 +282,8 @@ def structure_function(
     err_high = per84 - medians
     err = np.array([err_low.astype(float), err_high.astype(float)])
     if fit:
-        if verbose:
-            print("Fitting SF with a broken power law...")
+    
+        logger.info("Fitting SF with a broken power law...")
         # A few simple setup steps
         label = "linear_regression"
         if outdir is None:
@@ -304,7 +319,7 @@ def structure_function(
             fig = corner.corner(samps, labels=labels, fig=fig)
             if save_plots:
                 plt.savefig(os.path.join(outdir, "corner.pdf"))
-        if verbose:
+    
             amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
             break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
             a1_ps = np.nanpercentile(result.posterior["alpha_1"], [16, 50, 84])
@@ -321,11 +336,11 @@ def structure_function(
                 alpha_1 = round(alpha_1, uncertainty=a1_ps[2] - a1_ps[1])
                 alpha_2 = round(alpha_2, uncertainty=a2_ps[2] - a2_ps[1])
 
-            print("Fitting results:")
-            print(f"    Amplitude: {amplitude} [{data.unit**2}]")
-            print(f"    Break point: {x_break} [{u.deg}]")
-            print(f"    alpha 1 (theta < break): {alpha_1}")
-            print(f"    alpha 2 (theta > break): {alpha_2}")
+            logger.info("Fitting results:")
+            logger.info(f"    Amplitude: {amplitude} [{data.unit**2}]")
+            logger.info(f"    Break point: {x_break} [{u.deg}]")
+            logger.info(f"    alpha 1 (theta < break): {alpha_1}")
+            logger.info(f"    alpha 2 (theta > break): {alpha_2}")
     else:
         result = None
 
@@ -438,7 +453,7 @@ def structure_function(
         y = c_hbins
         X, Y = np.meshgrid(x, y)
         plt.figure(figsize=(7, 6), facecolor="w")
-        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r, shading="auto")
+        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r)
         plt.colorbar()
         plt.xticks(x)
         plt.yticks(y)
