@@ -259,7 +259,7 @@ def structure_function(
     sf_dists = np.zeros((len(cbins), samples))
     d_sf_dists = np.zeros((len(cbins), samples))
     for arr, xarr in zip(
-        (count, medians, per16, per84, sf_dists_cor, d_sf_dists), 
+        (count, medians, per16, per84, sf_dists_cor, sf_dists, d_sf_dists), 
         (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
     ):
         arr[count_xr.coords.to_index()[:-1]] = xarr[:-1]
