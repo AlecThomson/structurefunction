@@ -101,7 +101,15 @@ def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     )
     return result
 
-def combinate(data):
+def combinate(data: np.ndarray)->Tuple[np.ndarray, np.ndarray]:
+    """Return all combinations of data with itself
+
+    Args:
+        data (np.ndarray): Data to combine.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: Data_1 matched with Data_2
+    """
     ix, iy = np.triu_indices(
                     data.shape[0],
                     k=1
@@ -115,7 +123,18 @@ def mc_sample(
     data:np.ndarray, 
     errors:np.ndarray, 
     samples:int=1000
-):
+) -> np.ndarray:
+    """Sample errors using Monte-Carlo
+    Assuming Gaussian distribution.
+
+    Args:
+        data (np.ndarray): Measurements
+        errors (np.ndarray): Errors
+        samples (int, optional): Samples of the distribution. Defaults to 1000.
+
+    Returns:
+        np.ndarray: Sample array. Shape (len(data/errors),samples)
+    """
     data_dist = np.zeros(
         (len(data), samples)
     ).astype(data.dtype)
@@ -130,7 +149,6 @@ def structure_function(
     coords: SkyCoord,
     samples: int,
     bins: Union[u.Quantity, int],
-    weights: np.ndarray = None,
     show_plots: bool = False,
     save_plots: bool = False,
     verbose: bool = False,
