@@ -26,13 +26,6 @@ logger.basicConfig(
 
 quantity_support()
 warnings.filterwarnings("ignore")
-# warnings.filterwarnings("ignore", message="All-NaN slice encountered")
-# warnings.filterwarnings("ignore", message="All-NaN axis encountered")
-# warnings.filterwarnings("ignore", message="Mean of empty slice")
-# warnings.filterwarnings("ignore", message="converting a masked element to nan")
-# warnings.filterwarnings("ignore", message="invalid value encountered in power")
-# warnings.filterwarnings("ignore", message="overflow encountered in power")
-
 
 def model(x, amplitude, x_break, alpha_1, alpha_2):
     alpha = np.where(x < x_break, alpha_1, alpha_2)
