@@ -228,7 +228,7 @@ def structure_function(
     # Compute the SF
 
     logger.info("Computing SF...")
-    bins_idx = np.digitize(dtheta, bins, right=False)
+    bins_idx = np.digitize(dtheta, bins, right=True)
     cbins = np.sqrt(bins[1:] * bins[:-1])  # Take geometric mean of bins - assuming log
 
     diffs_xr = xr.Dataset(
