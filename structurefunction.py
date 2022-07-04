@@ -228,7 +228,7 @@ def structure_function(
     # Compute the SF
 
     logger.info("Computing SF...")
-    bins_idx = np.digitize(dtheta, bins, right=True)
+    bins_idx = pd.cut(dtheta, bins, include_lowest=True, labels=False, right=True).astype(int)
     cbins = np.sqrt(bins[1:] * bins[:-1])  # Take geometric mean of bins - assuming log
 
     diffs_xr = xr.Dataset(
@@ -261,17 +261,19 @@ def structure_function(
         (count, medians, per16, per84, sf_dists_cor, sf_dists, d_sf_dists),
         (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
     ):
-        arr[count_xr.coords.to_index()[:-1]] = xarr[:-1]
+        idx = count_xr.coords.to_index()
+        nan_clip = idx>=0 # Clip NaN indices
+        arr[idx[nan_clip]] = xarr[nan_clip]
     err_low = medians - per16
     err_high = per84 - medians
     err = np.array([err_low.astype(float), err_high.astype(float)])
+    if outdir is None:
+        outdir = "outdir"
+    bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
     if fit:
         logger.info("Fitting SF with a broken power law...")
         # A few simple setup steps
         label = "linear_regression"
-        if outdir is None:
-            outdir = "outdir"
-        bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
 
         # Only use bins with at least 10 sources
         cut = (
@@ -296,12 +298,16 @@ def structure_function(
             raise ValueError("Invalid fit type")
         result = fit_func(x, y, y_err, y_dist, outdir, label, verbose=verbose, **kwargs)
         if show_plots and fit != "astropy":
+            try:
+                result.plot_corner(dpi=300, save=save_plots)
+            except:
+                pass
             samps = result.samples
             labels = result.parameter_labels
-            fig = plt.figure(figsize=(10, 10), facecolor="w")
+            fig = plt.figure(facecolor="w")
             fig = corner.corner(samps, labels=labels, fig=fig)
             if save_plots:
-                plt.savefig(os.path.join(outdir, "corner.pdf"))
+                plt.savefig(os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight")
 
             amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
             break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
@@ -332,7 +338,7 @@ def structure_function(
     ##############################################################################
     if show_plots:
         good_idx = count >= 10
-        plt.figure(figsize=(6, 6), facecolor="w")
+        plt.figure(facecolor="w")
         plt.plot(
             cbins[good_idx],
             medians[good_idx],
@@ -404,9 +410,9 @@ def structure_function(
         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
         plt.legend()
         if save_plots:
-            plt.savefig(os.path.join(outdir, "errorbar.png"))
+            plt.savefig(os.path.join(outdir, "errorbar.pdf"), dpi=300, bbox_inches="tight")
 
-        plt.figure(figsize=(6, 6), facecolor="w")
+        plt.figure(facecolor="w")
         plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
         plt.xscale("log")
         plt.yscale("log")
@@ -414,12 +420,12 @@ def structure_function(
         plt.ylabel(r"Number of source pairs")
         plt.xlim(bins[0].value, bins[-1].value)
         if save_plots:
-            plt.savefig(os.path.join(outdir, "counts.png"))
+            plt.savefig(os.path.join(outdir, "counts.pdf"), dpi=300, bbox_inches="tight")
 
         counts = []
         cor_dists = sf_dists - d_sf_dists
-        plt.figure()
-        for dist in tqdm(cor_dists, disable=not verbose):
+        plt.figure(facecolor="w")
+        for dist in tqdm(cor_dists, disable=not verbose, desc="Making hist plot"):
             n, hbins, _ = plt.hist(
                 dist, range=(np.nanmin(cor_dists), np.nanmax(cor_dists)), bins=100
             )
@@ -435,7 +441,7 @@ def structure_function(
         x = cbins
         y = c_hbins
         X, Y = np.meshgrid(x, y)
-        plt.figure(figsize=(7, 6), facecolor="w")
+        plt.figure(facecolor="w")
         plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r)
         plt.colorbar()
         plt.xticks(x)
@@ -459,7 +465,7 @@ def structure_function(
             label="Expected saturation ($2\sigma^2$)",
         )
         if save_plots:
-            plt.savefig(os.path.join(outdir, "PDF.png"))
+            plt.savefig(os.path.join(outdir, "PDF.pdf"), dpi=300, bbox_inches="tight")
     ##############################################################################
 
     return cbins, medians, err, count, result
