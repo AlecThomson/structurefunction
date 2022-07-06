@@ -403,7 +403,6 @@ def structure_function(
         )
         plt.xscale("log")
         plt.yscale("log")
-        # plt.legend()
         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
         plt.xlim(bins[0].value, bins[-1].value)
@@ -455,7 +454,6 @@ def structure_function(
         if fit:
             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
-        plt.legend()
         plt.hlines(
             saturate,
             cbins.value.min(),
@@ -464,6 +462,7 @@ def structure_function(
             color="tab:red",
             label="Expected saturation ($2\sigma^2$)",
         )
+        plt.legend()
         if save_plots:
             plt.savefig(os.path.join(outdir, "PDF.pdf"), dpi=300, bbox_inches="tight")
     ##############################################################################
