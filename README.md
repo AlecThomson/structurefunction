@@ -8,11 +8,11 @@ I follow the definitions laid out by [Haverkorn et al. 2004](https://ui.adsabs.h
 
 The second-order structure function of RM is given by:
 
-<img src="https://render.githubusercontent.com/render/math?math=SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}{(\theta %2B \delta\theta)}]^2\rangle">
+$$ SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}{(\theta + \delta\theta)}]^2\rangle $$
 
 That is, the ensemble average of the squared-difference in RM for sources with angular seperation $\delta\theta$. We also need to correct for the impact of errors by:
 
-<img src="https://render.githubusercontent.com/render/math?math=SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta)">
+$$ SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta) $$
 
 Computing the error on the structure function is diffifcult. Here I use Monte-Carlo error propagation to compute the errors numerically.
 
