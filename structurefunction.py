@@ -327,10 +327,10 @@ def structure_function(
             alpha_2 = a2_ps[1]
 
             if fit != "astropy":
-                amplitude = round(amplitude, uncertainty=amp_ps[2] - amp_ps[1])
-                x_break = round(x_break, uncertainty=break_ps[2] - break_ps[1])
-                alpha_1 = round(alpha_1, uncertainty=a1_ps[2] - a1_ps[1])
-                alpha_2 = round(alpha_2, uncertainty=a2_ps[2] - a2_ps[1])
+                amplitude = round(amplitude.astype(float), uncertainty=(amp_ps[2] - amp_ps[1]).astype(float))
+                x_break = round(x_break.astype(float), uncertainty=(break_ps[2] - break_ps[1]).astype(float))
+                alpha_1 = round(alpha_1.astype(float), uncertainty=(a1_ps[2] - a1_ps[1]).astype(float))
+                alpha_2 = round(alpha_2.astype(float), uncertainty=(a2_ps[2] - a2_ps[1]).astype(float))
 
             logger.info("Fitting results:")
             logger.info(f"    Amplitude: {amplitude} [{data.unit**2}]")
