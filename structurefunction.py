@@ -27,6 +27,7 @@ logger.basicConfig(
 quantity_support()
 warnings.filterwarnings("ignore")
 
+
 def model(x, amplitude, x_break, alpha_1, alpha_2):
     alpha = np.where(x < x_break, alpha_1, alpha_2)
     xx = x / x_break
@@ -223,12 +224,16 @@ def structure_function(
         start = np.log10(np.min(dtheta).to(u.deg).value)
         stop = np.log10(np.max(dtheta).to(u.deg).value)
         bins = np.logspace(start, stop, nbins, endpoint=True) * u.deg
+        logger.info(f"Maximal angular separation: {np.max(dtheta)}")
+        logger.info(f"Minimal angular separation: {np.min(dtheta)}")
     else:
         nbins = len(bins)
     # Compute the SF
 
     logger.info("Computing SF...")
-    bins_idx = pd.cut(dtheta, bins, include_lowest=True, labels=False, right=True).astype(int)
+    bins_idx = pd.cut(
+        dtheta, bins, include_lowest=True, labels=False, right=True
+    ).astype(int)
     cbins = np.sqrt(bins[1:] * bins[:-1])  # Take geometric mean of bins - assuming log
 
     diffs_xr = xr.Dataset(
@@ -262,7 +267,7 @@ def structure_function(
         (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
     ):
         idx = count_xr.coords.to_index()
-        nan_clip = idx>=0 # Clip NaN indices
+        nan_clip = idx >= 0  # Clip NaN indices
         arr[idx[nan_clip]] = xarr[nan_clip]
     err_low = medians - per16
     err_high = per84 - medians
@@ -307,7 +312,9 @@ def structure_function(
             fig = plt.figure(facecolor="w")
             fig = corner.corner(samps, labels=labels, fig=fig)
             if save_plots:
-                plt.savefig(os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight")
+                plt.savefig(
+                    os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight"
+                )
 
             amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
             break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
@@ -409,7 +416,9 @@ def structure_function(
         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
         plt.legend()
         if save_plots:
-            plt.savefig(os.path.join(outdir, "errorbar.pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                os.path.join(outdir, "errorbar.pdf"), dpi=300, bbox_inches="tight"
+            )
 
         plt.figure(facecolor="w")
         plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
@@ -419,7 +428,9 @@ def structure_function(
         plt.ylabel(r"Number of source pairs")
         plt.xlim(bins[0].value, bins[-1].value)
         if save_plots:
-            plt.savefig(os.path.join(outdir, "counts.pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                os.path.join(outdir, "counts.pdf"), dpi=300, bbox_inches="tight"
+            )
 
         counts = []
         cor_dists = sf_dists - d_sf_dists
