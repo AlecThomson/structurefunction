@@ -186,13 +186,13 @@ def structure_function(
 
     logger.info("Sampling errors...")
     rm_dist = mc_sample(
-        data=data.value,
-        errors=errors.value,
+        data=data.value.astype(np.float64),
+        errors=errors.value.astype(np.float64),
         samples=samples,
     )
     d_rm_dist = mc_sample(
-        data=errors.value,
-        errors=errors.value,
+        data=errors.value.astype(np.float64),
+        errors=errors.value.astype(np.float64),
         samples=samples,
     )
 
@@ -399,7 +399,7 @@ def structure_function(
             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
 
-        saturate = np.var(data) * 2
+        saturate = np.nanvar(data) * 2
         plt.hlines(
             saturate,
             cbins.value.min(),
