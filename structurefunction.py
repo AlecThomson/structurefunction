@@ -87,11 +87,11 @@ def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
     likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
     priors = dict()
     priors["amplitude"] = bilby.core.prior.Uniform(
-        y.min() - y_err.max(), y.max() + y_err.max(), "amplitude"
+        y.min() - y_err.max(), y.max() + y_err.max(), "amplitude", latex_label="$a$"
     )
-    priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break")
-    priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1")
-    priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2")
+    priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break", latex_label=r"$\theta_\mathrm{break}$")
+    priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1", latex_label=r"$\alpha_1$")
+    priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2", latex_label=r"$\alpha_2$")
     result = bilby.run_sampler(
         likelihood=likelihood,
         priors=priors,
