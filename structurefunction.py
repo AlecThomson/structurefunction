@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import inspect
 from typing import Tuple, Union
 import numpy as np
 from astropy.coordinates import SkyCoord
@@ -12,7 +13,7 @@ import bilby
 from sigfig import round
 import corner
 from astropy.visualization import quantity_support
-from astropy.modeling import models, fitting
+from scipy.optimize import curve_fit
 import pandas as pd
 import numba as nb
 import xarray as xr
@@ -28,70 +29,150 @@ quantity_support()
 warnings.filterwarnings("ignore")
 
 
-def model(x, amplitude, x_break, alpha_1, alpha_2):
+def broken_power_law(
+    x: np.ndarray, amplitude: float, x_break: float, alpha_1: float, alpha_2: float
+) -> np.ndarray:
+    """Broken power law model
+
+    Args:
+        x (np.ndarray): Frequency
+        amplitude (float): Amplitude
+        x_break (float): Break frequency
+        alpha_1 (float): Power law index below break frequency
+        alpha_2 (float): Power law index above break frequency
+
+    Returns:
+        np.ndarray: Model array
+    """
     alpha = np.where(x < x_break, alpha_1, alpha_2)
     xx = x / x_break
-    return amplitude * np.power(xx, -alpha)
+    return amplitude * np.power(xx, alpha)
 
 
-def astropy_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+def power_law(x: np.ndarray, amplitude: float, x_break: float, alpha: float) -> np.ndarray:
+    """Power law model
+
+    Args:
+        x (np.ndarray): Frequency
+        amplitude (float): Amplitude
+        x_break (float): Reference frequency
+        alpha (float): Power law index
+
+    Returns:
+        np.ndarray: Model array
+    """
+    return amplitude * np.power(x / x_break, alpha)
+
+
+def lsq_fit(x: np.ndarray, y: np.ndarray, outdir: str, label: str, model=broken_power_law) -> bilby.core.result.Result:
+    """Least squares fit
+
+    Args:
+        x (np.ndarray): X data
+        y (np.ndarray): Y data
+        outdir (str): Output directory
+        label (str): Fitting label
+        model (func, optional): Model function. Defaults to broken_power_law.
+
+    Raises:
+        NotImplementedError: if model is not implemented
+
+    Returns:
+        Result: Fitting result
+    """
+    params = inspect.getfullargspec(model).args[1:]
     result = bilby.core.result.Result(label=label, outdir=outdir)
-    fitter = fitting.LevMarLSQFitter()
+    p0 = []
+    p0.append(np.average([y.min(), y.max()]))
+    p0.append(np.average([x.min(), x.max()]))
+    if model is broken_power_law:
+        p0.append(0)
+        p0.append(0)
+    elif model is power_law:
+        p0.append(0)
+    else:
+        raise NotImplementedError("Model not implemented")
+    popt, pcov = curve_fit(
+        f=model,
+        xdata=x,
+        ydata=y,
+        p0=p0,
+    )
 
-    # initialize a linear model
-    line_init = models.BrokenPowerLaw1D()
-    fitted_line = fitter(line_init, x, y, weights=1.0 / y_err**2)
-    amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
-    posterior = {
-        "amplitude": amplitude,
-        "x_break": x_break,
-        "alpha_1": alpha_1,
-        "alpha_2": alpha_2,
-    }
+    posterior = {param: popt[i] for i, param in enumerate(params)}
+
+    # Randomly sample models using covariance matrix
+    n_samples = 10_000
     result.posterior = pd.DataFrame(posterior, index=[0])
     result.parameter_labels = list(posterior.keys())
-    result.samples = np.array(list(posterior.values())).T[np.newaxis, :]
+    result.samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
     return result
 
 
-def astropy_fit_mc(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+def lsq_weight_fit(x, y, yerr, outdir, label, model=broken_power_law):
     result = bilby.core.result.Result(label=label, outdir=outdir)
-    fitter = fitting.LevMarLSQFitter()
+    p0 = []
+    p0.append(np.average([y.min() - yerr.max(), y.max() + yerr.max()]))
+    p0.append(np.average([x.min(), x.max()]))
+    if model is broken_power_law:
+        p0.append(0)
+        p0.append(0)
+    elif model is power_law:
+        p0.append(0)
+    else:
+        raise NotImplementedError("Model not implemented")
+    popt, pcov = curve_fit(
+        model,
+        x,
+        y,
+        sigma=yerr,
+        p0=p0,
+    )
 
-    posterior = {
-        "amplitude": [],
-        "x_break": [],
-        "alpha_1": [],
-        "alpha_2": [],
-    }
-    # initialize a linear model
-    line_init = models.BrokenPowerLaw1D()
+    params = inspect.getfullargspec(model).args[1:]
+    posterior = {param: popt[i] for i, param in enumerate(params)}
 
-    # loop over the samples
-    for y in tqdm(y_dist.T, disable=not verbose, desc="Fitting"):
-        fitted_line = fitter(line_init, x, y)
-        amplitude, x_break, alpha_1, alpha_2 = fitted_line.parameters
-        posterior["amplitude"].append(amplitude)
-        posterior["x_break"].append(x_break)
-        posterior["alpha_1"].append(alpha_1)
-        posterior["alpha_2"].append(alpha_2)
-    result.posterior = pd.DataFrame.from_dict(posterior)
+    # Randomly sample models using covariance matrix
+    n_samples = 10_000
+    result.posterior = pd.DataFrame(posterior, index=[0])
     result.parameter_labels = list(posterior.keys())
-    result.samples = np.array(list(posterior.values())).T
+    result.samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
     return result
 
 
-def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
+def bilby_fit(x, y, y_err, outdir, label, model=broken_power_law, **kwargs):
     # initialize a linear model
-    injection_parameters = dict(amplitude=1.0, x_break=1.0, alpha_1=1.0, alpha_2=1)
     likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
     priors = dict()
     priors["amplitude"] = bilby.core.prior.Uniform(
-        y.min() - y_err.max(), y.max() + y_err.max(), "amplitude", latex_label="$a$"
+        y.min() - y_err.max(),
+        y.max() + y_err.max(),
+        name="amplitude",
+        latex_label="$a$",
     )
-    priors["x_break"] = bilby.core.prior.Uniform(x.min(), x.max(), "x_break", latex_label=r"$\theta_\mathrm{break}$")
-    priors["alpha_1"] = bilby.core.prior.Uniform(-2, 2, "alpha_1", latex_label=r"$\alpha_1$")
-    priors["alpha_2"] = bilby.core.prior.Uniform(-2, 2, "alpha_2", latex_label=r"$\alpha_2$")
+    priors["x_break"] = bilby.core.prior.Uniform(
+        x.min(), x.max(), name="x_break", latex_label=r"$\theta_\mathrm{break}$"
+    )
+    if model is broken_power_law:
+        injection_parameters = dict(amplitude=1.0, x_break=1.0, alpha_1=1.0, alpha_2=1)
+        priors["alpha_1"] = bilby.core.prior.Uniform(
+            -2, 2, name="alpha_1", latex_label=r"$\alpha_1$"
+        )
+        priors["alpha_2"] = bilby.core.prior.Uniform(
+            -2, 2, name="alpha_2", latex_label=r"$\alpha_2$"
+        )
+    elif model is power_law:
+        injection_parameters = dict(
+            amplitude=1.0,
+            x_break=1.0,
+            alpha=1.0,
+        )
+        priors["alpha"] = bilby.core.prior.Uniform(
+            -2, 2, name="alpha", latex_label=r"$\alpha$"
+        )
+    else:
+        raise NotImplementedError("Model not implemented")
+
     result = bilby.run_sampler(
         likelihood=likelihood,
         priors=priors,
@@ -101,6 +182,7 @@ def bilby_fit(x, y, y_err, y_dist, outdir, label, verbose=False, **kwargs):
         label=label,
         **kwargs,
     )
+    result.parameter_labels = list(priors.keys())
     return result
 
 
@@ -149,6 +231,7 @@ def structure_function(
     verbose: bool = False,
     fit: str = None,
     outdir: str = None,
+    model_name: str = None,
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
@@ -276,9 +359,20 @@ def structure_function(
         outdir = "outdir"
     bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
     if fit:
-        logger.info("Fitting SF with a broken power law...")
+        if model_name is None:
+            model_name = "broken_power_law"
+        if model_name == "broken_power_law":
+            model = broken_power_law
+        elif model_name == "power_law":
+            model = power_law
+        else:
+            raise NotImplementedError(
+                "Only implemented for broken_power_law and power_law"
+            )
+
+        logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
         # A few simple setup steps
-        label = "linear_regression"
+        label = model_name
 
         # Only use bins with at least 10 sources
         cut = (
@@ -293,16 +387,31 @@ def structure_function(
         y_err = (per84 - per16)[cut] / 2
         y_dist = sf_dists_cor[cut]
 
-        if fit == "astropy":
-            fit_func = astropy_fit
-        elif fit == "astropy_mc":
-            fit_func = astropy_fit_mc
+        if fit == "lsq":
+            result = lsq_fit(
+                x=x,
+                y=y,
+                model=model,
+                outdir=outdir,
+                label=label,
+            )
+        elif fit == "lsq_weight":
+            result = lsq_weight_fit(
+                x=x,
+                y=y,
+                yerr=y_err,
+                model=model,
+                outdir=outdir,
+                label=label,
+            )
         elif fit == "bilby":
-            fit_func = bilby_fit
+            result = bilby_fit(
+                x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
+            )
         else:
             raise ValueError("Invalid fit type")
-        result = fit_func(x, y, y_err, y_dist, outdir, label, verbose=verbose, **kwargs)
-        if show_plots and fit != "astropy":
+
+        if show_plots:
             try:
                 result.plot_corner(dpi=300, save=save_plots)
             except:
@@ -315,28 +424,21 @@ def structure_function(
                 plt.savefig(
                     os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight"
                 )
+        perc_dict = {
+            key: np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
+            for key in result.parameter_labels
+        }
 
-            amp_ps = np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
-            break_ps = np.nanpercentile(result.posterior["x_break"], [16, 50, 84])
-            a1_ps = np.nanpercentile(result.posterior["alpha_1"], [16, 50, 84])
-            a2_ps = np.nanpercentile(result.posterior["alpha_2"], [16, 50, 84])
-
-            amplitude = amp_ps[1]
-            x_break = break_ps[1]
-            alpha_1 = a1_ps[1]
-            alpha_2 = a2_ps[1]
-
-            if fit != "astropy":
-                amplitude = round(amplitude.astype(float), uncertainty=(amp_ps[2] - amp_ps[1]).astype(float))
-                x_break = round(x_break.astype(float), uncertainty=(break_ps[2] - break_ps[1]).astype(float))
-                alpha_1 = round(alpha_1.astype(float), uncertainty=(a1_ps[2] - a1_ps[1]).astype(float))
-                alpha_2 = round(alpha_2.astype(float), uncertainty=(a2_ps[2] - a2_ps[1]).astype(float))
-
-            logger.info("Fitting results:")
-            logger.info(f"    Amplitude: {amplitude} [{data.unit**2}]")
-            logger.info(f"    Break point: {x_break} [{u.deg}]")
-            logger.info(f"    alpha 1 (theta < break): {alpha_1}")
-            logger.info(f"    alpha 2 (theta > break): {alpha_2}")
+        round_dict = {
+            key: round(
+                perc_dict[key][1].astype(float),
+                uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
+            )
+            for key in result.parameter_labels
+        }
+        logger.info("Fitting results:")
+        for key in round_dict.keys():
+            logger.info(f"{key}: {round_dict[key]}")
     else:
         result = None
 
@@ -384,12 +486,12 @@ def structure_function(
             # Sample the posterior randomly 100 times
             for i in range(1000):
                 idx = np.random.choice(np.arange(result.posterior.shape[0]))
+                s_dict = {
+                    key: result.posterior[key][idx] for key in result.parameter_labels
+                }
                 _mod = model(
                     x=cbins_hi,
-                    amplitude=result.posterior["amplitude"][idx],
-                    x_break=result.posterior["x_break"][idx],
-                    alpha_1=result.posterior["alpha_1"][idx],
-                    alpha_2=result.posterior["alpha_2"][idx],
+                    **s_dict,
                 )
                 # errDict[name] = model_dict['posterior'][name][idx]
                 errmodel.append(_mod)
