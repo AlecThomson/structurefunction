@@ -30,7 +30,11 @@ warnings.filterwarnings("ignore")
 
 
 def broken_power_law(
-    x: np.ndarray, amplitude: float, x_break: float, alpha_1: float, alpha_2: float
+    x: np.ndarray,
+    amplitude: float,
+    x_break: float,
+    alpha_1: float,
+    alpha_2: float,
 ) -> np.ndarray:
     """Broken power law model
 
@@ -49,7 +53,9 @@ def broken_power_law(
     return amplitude * np.power(xx, alpha)
 
 
-def power_law(x: np.ndarray, amplitude: float, x_break: float, alpha: float) -> np.ndarray:
+def power_law(
+    x: np.ndarray, amplitude: float, x_break: float, alpha: float
+) -> np.ndarray:
     """Power law model
 
     Args:
@@ -64,7 +70,9 @@ def power_law(x: np.ndarray, amplitude: float, x_break: float, alpha: float) -> 
     return amplitude * np.power(x / x_break, alpha)
 
 
-def lsq_fit(x: np.ndarray, y: np.ndarray, outdir: str, label: str, model=broken_power_law) -> bilby.core.result.Result:
+def lsq_fit(
+    x: np.ndarray, y: np.ndarray, outdir: str, label: str, model=broken_power_law
+) -> bilby.core.result.Result:
     """Least squares fit
 
     Args:
@@ -109,7 +117,30 @@ def lsq_fit(x: np.ndarray, y: np.ndarray, outdir: str, label: str, model=broken_
     return result
 
 
-def lsq_weight_fit(x, y, yerr, outdir, label, model=broken_power_law):
+def lsq_weight_fit(
+    x: np.ndarray,
+    y: np.ndarray,
+    yerr: np.ndarray,
+    outdir: str,
+    label: str,
+    model=broken_power_law,
+) -> bilby.core.result.Result:
+    """Weighted least squares fit
+
+    Args:
+        x (np.ndarray): X data
+        y (np.ndarray): Y data
+        yerr (np.ndarray): Y error
+        outdir (str): Output directory
+        label (str): Label
+        model (func, optional): Model function. Defaults to broken_power_law.
+
+    Raises:
+        NotImplementedError: If model is not implemented
+
+    Returns:
+        bilby.core.result.Result: Fiting result
+    """
     result = bilby.core.result.Result(label=label, outdir=outdir)
     p0 = []
     p0.append(np.average([y.min() - yerr.max(), y.max() + yerr.max()]))
@@ -140,7 +171,31 @@ def lsq_weight_fit(x, y, yerr, outdir, label, model=broken_power_law):
     return result
 
 
-def bilby_fit(x, y, y_err, outdir, label, model=broken_power_law, **kwargs):
+def bilby_fit(
+    x: np.ndarray,
+    y: np.ndarray,
+    y_err: np.ndarray,
+    outdir: str,
+    label: str,
+    model=broken_power_law,
+    **kwargs
+) -> bilby.core.result.Result:
+    """Bilby fit
+
+    Args:
+        x (np.ndarray): X data
+        y (np.ndarray): Y data
+        y_err (np.ndarray): Y error
+        outdir (str): Output directory
+        label (str): Label
+        model (func, optional): Model function. Defaults to broken_power_law.
+
+    Raises:
+        NotImplementedError: If model is not implemented
+
+    Returns:
+        bilby.core.result.Result: Fitting result
+    """
     # initialize a linear model
     likelihood = bilby.likelihood.GaussianLikelihood(x, y, model, y_err)
     priors = dict()
