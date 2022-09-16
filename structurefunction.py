@@ -91,13 +91,19 @@ def lsq_fit(
     params = inspect.getfullargspec(model).args[1:]
     result = bilby.core.result.Result(label=label, outdir=outdir)
     p0 = []
+    param_labels = []
     p0.append(np.average([y.min(), y.max()]))
+    param_labels.append(r"$\alpha$")
     p0.append(np.average([x.min(), x.max()]))
+    param_labels.append(r"$\theta_\mathrm{break}$")
     if model is broken_power_law:
         p0.append(0)
+        param_labels.append(r"$\alpha_1$")
         p0.append(0)
+        param_labels.append(r"$\alpha_2$")
     elif model is power_law:
         p0.append(0)
+        param_labels.append(r"$\alpha$")
     else:
         raise NotImplementedError("Model not implemented")
     popt, pcov = curve_fit(
@@ -107,13 +113,15 @@ def lsq_fit(
         p0=p0,
     )
 
-    posterior = {param: popt[i] for i, param in enumerate(params)}
-
+    params = inspect.getfullargspec(model).args[1:]
     # Randomly sample models using covariance matrix
     n_samples = 10_000
-    result.posterior = pd.DataFrame(posterior, index=[0])
-    result.parameter_labels = list(posterior.keys())
-    result.samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
+    samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
+    result.posterior = pd.DataFrame(samples, columns=params)
+    result.parameter_labels = list(params)
+    result.search_parameter_keys = list(params)
+    result.samples = samples
+    result.parameter_labels_with_unit = param_labels
     return result
 
 
@@ -143,13 +151,19 @@ def lsq_weight_fit(
     """
     result = bilby.core.result.Result(label=label, outdir=outdir)
     p0 = []
+    param_labels = []
     p0.append(np.average([y.min() - yerr.max(), y.max() + yerr.max()]))
+    param_labels.append(r"$\alpha$")
     p0.append(np.average([x.min(), x.max()]))
+    param_labels.append(r"$\theta_\mathrm{break}$")
     if model is broken_power_law:
         p0.append(0)
+        param_labels.append(r"$\alpha_1$")
         p0.append(0)
+        param_labels.append(r"$\alpha_2$")
     elif model is power_law:
         p0.append(0)
+        param_labels.append(r"$\alpha$")
     else:
         raise NotImplementedError("Model not implemented")
     popt, pcov = curve_fit(
@@ -161,13 +175,14 @@ def lsq_weight_fit(
     )
 
     params = inspect.getfullargspec(model).args[1:]
-    posterior = {param: popt[i] for i, param in enumerate(params)}
-
     # Randomly sample models using covariance matrix
     n_samples = 10_000
-    result.posterior = pd.DataFrame(posterior, index=[0])
-    result.parameter_labels = list(posterior.keys())
-    result.samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
+    samples = np.random.default_rng().multivariate_normal(popt, pcov, n_samples)
+    result.posterior = pd.DataFrame(samples, columns=params)
+    result.parameter_labels = list(params)
+    result.search_parameter_keys = list(params)
+    result.samples = samples
+    result.parameter_labels_with_unit = param_labels
     return result
 
 
@@ -302,6 +317,7 @@ def structure_function(
         verbose (bool, optional): Print progress. Defaults to False.
         fit (str, optional): How to fit the broken powerlaw. Can be 'astropy', 'astropy_mc' or 'bilby'. Defaults to None.
         outdir (str, optional): Output directory for bilby. Defaults to None.
+        model_name (str, optional): Name of the model. Defaults to None. Can be 'broken_power_law' or 'power_law'.
         **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
     Returns:
@@ -480,7 +496,7 @@ def structure_function(
                     os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight"
                 )
         perc_dict = {
-            key: np.nanpercentile(result.posterior["amplitude"], [16, 50, 84])
+            key: np.nanpercentile(result.posterior[key], [16, 50, 84])
             for key in result.parameter_labels
         }
 
@@ -494,6 +510,7 @@ def structure_function(
         logger.info("Fitting results:")
         for key in round_dict.keys():
             logger.info(f"{key}: {round_dict[key]}")
+        logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
     else:
         result = None
 
