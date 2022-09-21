@@ -493,7 +493,7 @@ def structure_function(
             fig = corner.corner(samps, labels=labels, fig=fig)
             if save_plots:
                 plt.savefig(
-                    os.path.join(outdir, "corner.pdf"), dpi=300, bbox_inches="tight"
+                    os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
                 )
         perc_dict = {
             key: np.nanpercentile(result.posterior[key], [16, 50, 84])
@@ -591,7 +591,7 @@ def structure_function(
         plt.legend()
         if save_plots:
             plt.savefig(
-                os.path.join(outdir, "errorbar.pdf"), dpi=300, bbox_inches="tight"
+                os.path.join(outdir, f"{label}_errorbar.pdf"), dpi=300, bbox_inches="tight"
             )
 
         plt.figure(facecolor="w")
@@ -603,7 +603,7 @@ def structure_function(
         plt.xlim(bins[0].value, bins[-1].value)
         if save_plots:
             plt.savefig(
-                os.path.join(outdir, "counts.pdf"), dpi=300, bbox_inches="tight"
+                os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
             )
 
         counts = []
@@ -649,7 +649,7 @@ def structure_function(
         )
         plt.legend()
         if save_plots:
-            plt.savefig(os.path.join(outdir, "PDF.pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(os.path.join(outdir, f"{label}_PDF.pdf"), dpi=300, bbox_inches="tight")
     ##############################################################################
 
     return cbins, medians, err, count, result
