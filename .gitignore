@@ -159,3 +159,6 @@ structurefunction.ipynb
 example/outdir
 example/.DS_Store
 outdir/*.json
+old_test.ipynb
+triple_dev.ipynb
+triple_test.ipynb
