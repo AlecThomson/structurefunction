@@ -301,13 +301,6 @@ def sf_two_point(
 
     samples = rm_1.shape[0]
 
-    def _sf_func(x):
-        return ((x.rm_1 - x.rm_2)**2).mean(dim='source_pair')
-
-    def _sf_err_func(x):
-        return ((x.rm_err_1 - x.rm_err_2)**2).mean(dim='source_pair')
-
-
     data_xr = xr.Dataset(
         dict(
             rm_1=(["sample", "source_pair"], rm_1),
@@ -321,26 +314,31 @@ def sf_two_point(
         ),
     )
 
+    # Groupby separation
     grp = data_xr.groupby_bins("seps", bins)
 
-    sf = grp.apply(_sf_func)
-    sf_err = grp.apply(_sf_err_func)
-    sf_corr = sf - sf_err
+    # Compute Structure Function
+    sf_xr = grp.apply(lambda x: ((x.rm_1 - x.rm_2)**2).mean(dim="source_pair"))
+    # Correct for errors
+    sf_err_xr = grp.apply(lambda x: ((x.rm_err_1 - x.rm_err_2)**2).mean(dim="source_pair"))
+    sf_corr_xr = sf_xr - sf_err_xr
 
-    medians = sf_corr.quantile(0.5, dim="sample")
+    # Compute error
+    p1, med, p2 = sf_corr_xr.quantile([0.16, 0.5, 0.84], dim="sample")
 
-    err_low = medians - sf_corr.quantile(0.16, dim="sample")
+    err_low = med - p1
+    err_high = p2 - med
 
-    err_high = sf_corr.quantile(0.84, dim="sample") - medians
-
+    # Get source pair count
     count = grp.count(dim="source_pair").rm_1[:,0]
 
+    # Get bin centers
     c_bins = np.array(
-        [i.mid for i in grp.apply(_sf_func).seps_bins.values]
+        [i.mid for i in sf_corr_xr.seps_bins.values]
     )
 
     return (
-        medians.values,
+        med.values,
         err_low.values,
         err_high.values,
         count.values,
@@ -353,16 +351,13 @@ def sf_three_point(
     rm_2: np.ndarray,
     rm_err_1: np.ndarray,
     rm_err_2: np.ndarray,
-    bins_idx: np.ndarray,
+    src_1: np.ndarray,
+    src_2: np.ndarray,
+    dtheta: u.Quantity,
+    bins: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
     samples = rm_1.shape[0]
-
-    def _sf_func(x):
-        sf_dist = ((x.rm_2 - 2*x.rm_1 + x.rm_3)**2).mean(dim='source_triplet')
-        sf_err_dist = ((x.rm_err_2 - 2*x.rm_err_1 + x.rm_err_2)**2).mean(dim='source_triplet')
-        sf_corr = sf_dist - sf_err_dist
-        return sf_corr
 
     data_xr = xr.Dataset(
         dict(
@@ -370,14 +365,18 @@ def sf_three_point(
             rm_2=(["sample", "source_pair"], rm_2),
             rm_err_1=(["sample", "source_pair"], rm_err_1),
             rm_err_2=(["sample", "source_pair"], rm_err_2),
+
         ),
         coords=dict(
-            bins_idx=("source_pair", bins_idx),
+            seps=("source_pair", dtheta.to(u.deg)),
             sample=("sample", np.arange(samples)),
+            src_1=("source_pair", src_1),
+            src_2=("source_pair", src_2),
         ),
     )
 
-    grp = data_xr.groupby("bins_idx")
+    # Groupby separation
+    grp = data_xr.groupby_bins("seps", bins)
 
     rm_1s = []
     rm_2s = []
@@ -385,9 +384,9 @@ def sf_three_point(
     rm_err_1s = []
     rm_err_2s = []
     rm_err_3s = []
-    bins_idxs = []
+    centres = []
     for i, g in tqdm(grp):
-        if i < 0:
+        if len(g.source_pair) < 0:
             continue
         for _, t in g.groupby("src_1"):
             if len(t["source_pair"]) < 3:
@@ -405,8 +404,7 @@ def sf_three_point(
                 rm_err_1s.append(_rm_err_1)
                 rm_err_2s.append(_rm_err_2)
                 rm_err_3s.append(_rm_err_3)
-                b_idx = t.bins_idx.values[0]
-                bins_idxs.append(b_idx)
+                centres.append(i.mid)
 
     triple = xr.Dataset(
         dict(
@@ -419,17 +417,35 @@ def sf_three_point(
         ),
         coords=dict(
             samples=("sample", np.arange(samples)),
-            bins_idx=("source_triplet", bins_idx),
+            seps=("source_triplet", np.array(centres)),
         ),
     )
 
-    sf_xr = triple.groupby("bins_idx")
-    medians = sf_xr.apply(_sf_func).quantile(0.5, dim="sample")
-    err_low = medians - sf_xr.apply(_sf_func).quantile(0.16, dim="sample")
-    err_high = sf_xr.apply(_sf_func).quantile(0.84, dim="sample") - medians
-    count = sf_xr.count(dim="source_triplet").rm_1[:,0]
+    triple_grp = triple.groupby("seps")
+    sf_t_xr = triple_grp.apply(lambda x: ((x.rm_2 - 2*x.rm_1 + x.rm_3)**2).mean(dim='source_triplet'))
+    sf_err_t_xr = triple_grp.apply(lambda x: ((x.rm_err_2 - 2*x.rm_err_1 + x.rm_err_3)**2).mean(dim='source_triplet'))
+    sf_t_xr_corr = sf_t_xr - sf_err_t_xr
 
-    return medians, err_low, err_high, count
+    p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
+
+    err_low = med - p1
+    err_high = p2 - med
+
+    # Get source pair count
+    count = triple_grp.count(dim="source_triplet").rm_1[:,0]
+
+    # Get bin centers
+    c_bins = np.array(
+        [i for i in sf_t_xr_corr.seps.values]
+    )
+
+    return (
+        med.values,
+        err_low.values,
+        err_high.values,
+        count.values,
+        c_bins,
+    )
 
 
 
@@ -524,7 +540,7 @@ def structure_function(
     logger.info("Computing SF...")
 
     if n_point == 2:
-        medians, err_low, err_high, count = sf_two_point(
+        medians, err_low, err_high, count, c_bins = sf_two_point(
             rm_1=rm_1.T,
             rm_2=rm_2.T,
             rm_err_1=d_rm_1.T,
@@ -533,108 +549,143 @@ def structure_function(
             bins=bins,
         )
     elif n_point == 3:
-        medians, err_low, err_high, count = sf_three_point(
+        source_ids = np.arange(len(coords))
+        src_1, src_2 = combinate(source_ids)
+        medians, err_low, err_high, count, c_bins = sf_three_point(
             rm_1=rm_1.T,
             rm_2=rm_2.T,
             rm_err_1=d_rm_1.T,
             rm_err_2=d_rm_2.T,
-            bins_idx=bins_idx,
-            samples=samples,
+            src_1=src_1,
+            src_2=src_2,
+            dtheta=dtheta,
+            bins=bins,
         )
     else:
         raise NotImplementedError("Only 2 and 3 point SF are implemented.")
 
+    # Fit the SF
+    if fit is not None:
+        result = fit_data(
+            medians=medians,
+            err_low=err_low,
+            err_high=err_high,
+            count=count,
+            c_bins=c_bins,
+            fit=fit,
+            outdir=outdir,
+            model_name=model_name,
+            show_plots=show_plots,
+            save_plots=save_plots,
+            **kwargs,
+        )
+
+    return medians, err_low, err_high, count, c_bins
 
 
 
-# def fit_and_stuff():
-#     if outdir is None:
-#         outdir = "outdir"
-#     bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
-#     if fit:
-#         if model_name is None:
-#             model_name = "broken_power_law"
-#         if model_name == "broken_power_law":
-#             model = broken_power_law
-#         elif model_name == "power_law":
-#             model = power_law
-#         else:
-#             raise NotImplementedError(
-#                 "Only implemented for broken_power_law and power_law"
-#             )
+def fit_data(
+    medians: np.ndarray,
+    err_low: np.ndarray,
+    err_high: np.ndarray,
+    count: np.ndarray,
+    c_bins: np.ndarray,
+    fit: str = 'bilby',
+    outdir: str = None,
+    model_name: str = None,
+    show_plots: bool = False,
+    save_plots: bool = False,
+    **kwargs,
+):
+    if outdir is None:
+        outdir = "outdir"
+    bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
+    if fit:
+        if model_name is None:
+            model_name = "broken_power_law"
+        if model_name == "broken_power_law":
+            model = broken_power_law
+        elif model_name == "power_law":
+            model = power_law
+        else:
+            raise NotImplementedError(
+                "Only implemented for broken_power_law and power_law"
+            )
 
-#         logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
-#         # A few simple setup steps
-#         label = model_name
+        logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
+        # A few simple setup steps
+        label = model_name
 
-#         # Only use bins with at least 10 sources
-#         cut = (
-#             (count >= 10)
-#             & np.isfinite(cbins)
-#             & np.isfinite(medians)
-#             & np.isfinite(err[0])
-#             & np.isfinite(err[1])
-#         )
-#         x = np.array(cbins[cut].value)
-#         y = medians[cut]
-#         y_err = (per84 - per16)[cut] / 2
-#         y_dist = sf_dists_cor[cut]
+        # Only use bins with at least 10 sources
+        cut = (
+            (count >= 10)
+            & np.isfinite(c_bins)
+            & np.isfinite(medians)
+            & np.isfinite(err_low)
+            & np.isfinite(err_high)
+        )
+        x = np.array(c_bins[cut].value)
+        y = medians[cut]
+        per84 = err_high - medians
+        per16 = medians - err_low
+        y_err = (per84 - per16)[cut] / 2
 
-#         if fit == "lsq":
-#             result = lsq_fit(
-#                 x=x,
-#                 y=y,
-#                 model=model,
-#                 outdir=outdir,
-#                 label=label,
-#             )
-#         elif fit == "lsq_weight":
-#             result = lsq_weight_fit(
-#                 x=x,
-#                 y=y,
-#                 yerr=y_err,
-#                 model=model,
-#                 outdir=outdir,
-#                 label=label,
-#             )
-#         elif fit == "bilby":
-#             result = bilby_fit(
-#                 x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
-#             )
-#         else:
-#             raise ValueError("Invalid fit type")
+        if fit == "lsq":
+            result = lsq_fit(
+                x=x,
+                y=y,
+                model=model,
+                outdir=outdir,
+                label=label,
+            )
+        elif fit == "lsq_weight":
+            result = lsq_weight_fit(
+                x=x,
+                y=y,
+                yerr=y_err,
+                model=model,
+                outdir=outdir,
+                label=label,
+            )
+        elif fit == "bilby":
+            result = bilby_fit(
+                x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
+            )
+        else:
+            raise ValueError("Invalid fit type")
 
-#         if show_plots:
-#             try:
-#                 result.plot_corner(dpi=300, save=save_plots)
-#             except:
-#                 pass
-#             samps = result.samples
-#             labels = result.parameter_labels
-#             fig = plt.figure(facecolor="w")
-#             fig = corner.corner(samps, labels=labels, fig=fig)
-#             if save_plots:
-#                 plt.savefig(
-#                     os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
-#                 )
-#         perc_dict = {
-#             key: np.nanpercentile(result.posterior[key], [16, 50, 84])
-#             for key in result.parameter_labels
-#         }
+        if show_plots:
+            try:
+                result.plot_corner(dpi=300, save=save_plots)
+            except:
+                pass
+            samps = result.samples
+            labels = result.parameter_labels
+            fig = plt.figure(facecolor="w")
+            fig = corner.corner(samps, labels=labels, fig=fig)
+            if save_plots:
+                plt.savefig(
+                    os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
+                )
+        perc_dict = {
+            key: np.nanpercentile(result.posterior[key], [16, 50, 84])
+            for key in result.parameter_labels
+        }
 
-#         round_dict = {
-#             key: round(
-#                 perc_dict[key][1].astype(float),
-#                 uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
-#             )
-#             for key in result.parameter_labels
-#         }
-#         logger.info("Fitting results:")
-#         for key in round_dict.keys():
-#             logger.info(f"{key}: {round_dict[key]}")
-#         logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
-#     else:
-#         result = None
+        round_dict = {
+            key: round(
+                perc_dict[key][1].astype(float),
+                uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
+            )
+            for key in result.parameter_labels
+        }
+        logger.info("Fitting results:")
+        for key in round_dict.keys():
+            logger.info(f"{key}: {round_dict[key]}")
+        logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
+    else:
+        result = None
+    return result
 
 #     ##############################################################################
 
