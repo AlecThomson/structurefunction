@@ -425,14 +425,14 @@ def sf_three_point(
     sf_t_xr = triple_grp.apply(
         lambda x: ((x.rm_2 - 2 * x.rm_1 + x.rm_3) ** 2).mean(dim="source_triplet")
     )
-    # TODO: Correct for errors
-    # sf_err_t_xr = triple_grp.apply(
-    #     lambda x: ((x.rm_err_2 - 2 * x.rm_err_1 + x.rm_err_3) ** 2).mean(
-    #         dim="source_triplet"
-    #     )
-    # )
+    # TODO: Check if this is correct
+    sf_err_t_xr = triple_grp.apply(
+        lambda x: ((x.rm_err_2 - 2 * x.rm_err_1 + x.rm_err_3) ** 2).mean(
+            dim="source_triplet"
+        )
+    )
 
-    # sf_t_xr_corr = sf_t_xr - sf_err_t_xr
+    sf_t_xr_corr = sf_t_xr - sf_err_t_xr
     sf_t_xr_corr = sf_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
