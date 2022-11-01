@@ -499,8 +499,8 @@ def fit_data(
     )
     x = np.array(c_bins[cut].value)
     y = medians[cut]
-    per84 = err_high - medians
-    per16 = medians - err_low
+    per84 = err_high + medians
+    per16 = -err_low + medians
     y_err = (per84 - per16)[cut] / 2
 
     if fit == "lsq":
@@ -729,7 +729,7 @@ def structure_function(
     )
     d_rm_dist = mc_sample(
         data=errors.value.astype(np.float64),
-        errors=errors.value.astype(np.float64),
+        errors=errors.value.astype(np.float64), # Yo dawg...
         samples=samples,
     )
 
