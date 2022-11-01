@@ -316,7 +316,7 @@ def sf_two_point(
     )
 
     # Groupby separation
-    grp = data_xr.groupby_bins("seps", bins)
+    grp = data_xr.groupby_bins("seps", bins.to(u.deg).value)
 
     # Compute Structure Function
     sf_xr = grp.apply(lambda x: ((x.rm_1 - x.rm_2) ** 2).mean(dim="source_pair"))
@@ -336,7 +336,7 @@ def sf_two_point(
     count = grp.count(dim="source_pair").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values])
+    c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values]) * u.deg
 
     return (
         med.values,
@@ -376,7 +376,7 @@ def sf_three_point(
     )
 
     # Groupby separation
-    grp = data_xr.groupby_bins("seps", bins)
+    grp = data_xr.groupby_bins("seps", bins.to(u.deg).value)
 
     rm_1s = []
     rm_2s = []
@@ -425,12 +425,15 @@ def sf_three_point(
     sf_t_xr = triple_grp.apply(
         lambda x: ((x.rm_2 - 2 * x.rm_1 + x.rm_3) ** 2).mean(dim="source_triplet")
     )
-    sf_err_t_xr = triple_grp.apply(
-        lambda x: ((x.rm_err_2 - 2 * x.rm_err_1 + x.rm_err_3) ** 2).mean(
-            dim="source_triplet"
-        )
-    )
-    sf_t_xr_corr = sf_t_xr - sf_err_t_xr
+    # TODO: Correct for errors
+    # sf_err_t_xr = triple_grp.apply(
+    #     lambda x: ((x.rm_err_2 - 2 * x.rm_err_1 + x.rm_err_3) ** 2).mean(
+    #         dim="source_triplet"
+    #     )
+    # )
+
+    # sf_t_xr_corr = sf_t_xr - sf_err_t_xr
+    sf_t_xr_corr = sf_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
 
@@ -441,7 +444,7 @@ def sf_three_point(
     count = triple_grp.count(dim="source_triplet").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array([i for i in sf_t_xr_corr.seps.values])
+    c_bins = np.array([i for i in sf_t_xr_corr.seps.values]) * u.deg
 
     return (
         med.values,
@@ -450,6 +453,223 @@ def sf_three_point(
         count.values,
         c_bins,
     )
+
+
+def fit_data(
+    medians: np.ndarray,
+    err_low: np.ndarray,
+    err_high: np.ndarray,
+    count: np.ndarray,
+    c_bins: np.ndarray,
+    fit: str = "bilby",
+    outdir: str = None,
+    model_name: str = None,
+    n_point: int=2,
+    show_plots: bool = False,
+    save_plots: bool = False,
+    **kwargs,
+) -> Union[None, bilby.core.result.Result]:
+    if outdir is None:
+        outdir = "outdir"
+    bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
+
+    if not fit:
+        return None, None, outdir
+
+    if model_name is None:
+        model_name = "broken_power_law"
+    if model_name == "broken_power_law":
+        model = broken_power_law
+    elif model_name == "power_law":
+        model = power_law
+    else:
+        raise NotImplementedError("Only implemented for broken_power_law and power_law")
+
+    logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
+    # A few simple setup steps
+    label = f"{model_name}_{n_point}_point"
+
+    # Only use bins with at least 10 sources
+    cut = (
+        (count >= 10)
+        & np.isfinite(c_bins)
+        & np.isfinite(medians)
+        & np.isfinite(err_low)
+        & np.isfinite(err_high)
+    )
+    x = np.array(c_bins[cut].value)
+    y = medians[cut]
+    per84 = err_high - medians
+    per16 = medians - err_low
+    y_err = (per84 - per16)[cut] / 2
+
+    if fit == "lsq":
+        result = lsq_fit(
+            x=x,
+            y=y,
+            model=model,
+            outdir=outdir,
+            label=label,
+        )
+    elif fit == "lsq_weight":
+        result = lsq_weight_fit(
+            x=x,
+            y=y,
+            yerr=y_err,
+            model=model,
+            outdir=outdir,
+            label=label,
+        )
+    elif fit == "bilby":
+        result = bilby_fit(
+            x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
+        )
+    else:
+        raise ValueError("Invalid fit type")
+
+    if show_plots:
+        try:
+            result.plot_corner(dpi=300, save=save_plots)
+        except:
+            pass
+        samps = result.samples
+        labels = result.parameter_labels
+        fig = plt.figure(facecolor="w")
+        fig = corner.corner(samps, labels=labels, fig=fig)
+        if save_plots:
+            plt.savefig(
+                os.path.join(outdir, f"{label}_corner.pdf"),
+                dpi=300,
+                bbox_inches="tight",
+            )
+    perc_dict = {
+        key: np.nanpercentile(result.posterior[key], [16, 50, 84])
+        for key in result.parameter_labels
+    }
+
+    round_dict = {
+        key: round(
+            perc_dict[key][1].astype(float),
+            uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
+        )
+        for key in result.parameter_labels
+    }
+    logger.info("Fitting results:")
+    for key in round_dict.keys():
+        logger.info(f"{key}: {round_dict[key]}")
+    logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
+
+    return result, model, outdir
+
+
+#     ##############################################################################
+
+#     ##############################################################################
+def plot_sf(
+    data: u.Quantity,
+    bins: u.Quantity,
+    count: np.ndarray,
+    cbins: np.ndarray,
+    medians: np.ndarray,
+    err_low: np.ndarray,
+    err_high: np.ndarray,
+    saturate: float,
+    fit: str = None,
+    result: bilby.core.result.Result = None,
+    model: Callable = None,
+    outdir: str = ".",
+    save_plots: bool = False,
+    label: str = "",
+    n_point: int = 2,
+):
+    word = "pairs" if n_point==2 else "triplets"
+    good_idx = count >= 10
+    plt.figure(facecolor="w")
+    plt.plot(
+        cbins[good_idx],
+        medians[good_idx],
+        ".",
+        c="tab:blue",
+        label=f"Reliable bins (>= 10 source {word})",
+    )
+    plt.plot(
+        cbins[~good_idx],
+        medians[~good_idx],
+        ".",
+        c="tab:red",
+        label=f"Unreliable bins (< 10 source {word})",
+    )
+    plt.errorbar(
+        cbins.value[good_idx],
+        medians[good_idx],
+        yerr=(err_low[good_idx], err_high[good_idx]),
+        color="tab:blue",
+        marker=None,
+        fmt=" ",
+    )
+    plt.errorbar(
+        cbins.value[~good_idx],
+        medians[~good_idx],
+        yerr=(err_low[~good_idx], err_high[~good_idx]),
+        color="tab:red",
+        marker=None,
+        fmt=" ",
+    )
+    if fit:
+        cbins_hi = np.logspace(
+            np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
+        )
+        errmodel = []
+        # Sample the posterior randomly 100 times
+        for i in range(1000):
+            idx = np.random.choice(np.arange(result.posterior.shape[0]))
+            s_dict = {
+                key: result.posterior[key][idx] for key in result.parameter_labels
+            }
+            _mod = model(
+                x=cbins_hi,
+                **s_dict,
+            )
+            # errDict[name] = model_dict['posterior'][name][idx]
+            errmodel.append(_mod)
+        errmodel = np.array(errmodel)
+        low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
+        # med = fitted_line(cbins_hi)
+        plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
+        plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
+
+    plt.hlines(
+        saturate,
+        cbins.value.min(),
+        cbins.value.max(),
+        linestyle="--",
+        color="tab:red",
+        label="Expected saturation ($2\sigma^2$)" if n_point==2 else "Expected saturation ($6\sigma^2$)",
+    )
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
+    plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
+    plt.xlim(bins[0].value, bins[-1].value)
+    plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
+    plt.legend()
+    if save_plots:
+        plt.savefig(
+            os.path.join(outdir, f"{label}_errorbar.pdf"), dpi=300, bbox_inches="tight"
+        )
+
+    plt.figure(facecolor="w")
+    plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
+    plt.ylabel(rf"Number of source {word}")
+    plt.xlim(bins[0].value, bins[-1].value)
+    if save_plots:
+        plt.savefig(
+            os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
+        )
+
 
 
 def structure_function(
@@ -600,219 +820,7 @@ def structure_function(
             outdir=outdir,
             save_plots=save_plots,
             label=model_name,
+            n_point=n_point,
         )
 
-    return medians, err_low, err_high, count, c_bins
-
-
-def fit_data(
-    medians: np.ndarray,
-    err_low: np.ndarray,
-    err_high: np.ndarray,
-    count: np.ndarray,
-    c_bins: np.ndarray,
-    fit: str = "bilby",
-    outdir: str = None,
-    model_name: str = None,
-    show_plots: bool = False,
-    save_plots: bool = False,
-    **kwargs,
-) -> Union[None, bilby.core.result.Result]:
-    if outdir is None:
-        outdir = "outdir"
-    bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
-
-    if not fit:
-        return None, None, outdir
-
-    if model_name is None:
-        model_name = "broken_power_law"
-    if model_name == "broken_power_law":
-        model = broken_power_law
-    elif model_name == "power_law":
-        model = power_law
-    else:
-        raise NotImplementedError("Only implemented for broken_power_law and power_law")
-
-    logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
-    # A few simple setup steps
-    label = model_name
-
-    # Only use bins with at least 10 sources
-    cut = (
-        (count >= 10)
-        & np.isfinite(c_bins)
-        & np.isfinite(medians)
-        & np.isfinite(err_low)
-        & np.isfinite(err_high)
-    )
-    x = np.array(c_bins[cut].value)
-    y = medians[cut]
-    per84 = err_high - medians
-    per16 = medians - err_low
-    y_err = (per84 - per16)[cut] / 2
-
-    if fit == "lsq":
-        result = lsq_fit(
-            x=x,
-            y=y,
-            model=model,
-            outdir=outdir,
-            label=label,
-        )
-    elif fit == "lsq_weight":
-        result = lsq_weight_fit(
-            x=x,
-            y=y,
-            yerr=y_err,
-            model=model,
-            outdir=outdir,
-            label=label,
-        )
-    elif fit == "bilby":
-        result = bilby_fit(
-            x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
-        )
-    else:
-        raise ValueError("Invalid fit type")
-
-    if show_plots:
-        try:
-            result.plot_corner(dpi=300, save=save_plots)
-        except:
-            pass
-        samps = result.samples
-        labels = result.parameter_labels
-        fig = plt.figure(facecolor="w")
-        fig = corner.corner(samps, labels=labels, fig=fig)
-        if save_plots:
-            plt.savefig(
-                os.path.join(outdir, f"{label}_corner.pdf"),
-                dpi=300,
-                bbox_inches="tight",
-            )
-    perc_dict = {
-        key: np.nanpercentile(result.posterior[key], [16, 50, 84])
-        for key in result.parameter_labels
-    }
-
-    round_dict = {
-        key: round(
-            perc_dict[key][1].astype(float),
-            uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
-        )
-        for key in result.parameter_labels
-    }
-    logger.info("Fitting results:")
-    for key in round_dict.keys():
-        logger.info(f"{key}: {round_dict[key]}")
-    logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
-
-    return result, model, outdir
-
-
-#     ##############################################################################
-
-#     ##############################################################################
-def plot_sf(
-    data: u.Quantity,
-    bins: u.Quantity,
-    count: np.ndarray,
-    cbins: np.ndarray,
-    medians: np.ndarray,
-    err_low: np.ndarray,
-    err_high: np.ndarray,
-    saturate: float,
-    fit: str = None,
-    result: bilby.core.result.Result = None,
-    model: Callable = None,
-    outdir: str = ".",
-    save_plots: bool = False,
-    label: str = "",
-):
-    good_idx = count >= 10
-    plt.figure(facecolor="w")
-    plt.plot(
-        cbins[good_idx],
-        medians[good_idx],
-        ".",
-        c="tab:blue",
-        label="Reliable bins (>= 10 source pairs)",
-    )
-    plt.plot(
-        cbins[~good_idx],
-        medians[~good_idx],
-        ".",
-        c="tab:red",
-        label="Unreliable bins (< 10 source pairs)",
-    )
-    plt.errorbar(
-        cbins.value[good_idx],
-        medians[good_idx],
-        yerr=(err_low[good_idx], err_high[good_idx]),
-        color="tab:blue",
-        marker=None,
-        fmt=" ",
-    )
-    plt.errorbar(
-        cbins.value[~good_idx],
-        medians[~good_idx],
-        yerr=(err_low[~good_idx], err_high[~good_idx]),
-        color="tab:red",
-        marker=None,
-        fmt=" ",
-    )
-    if fit:
-        cbins_hi = np.logspace(
-            np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
-        )
-        errmodel = []
-        # Sample the posterior randomly 100 times
-        for i in range(1000):
-            idx = np.random.choice(np.arange(result.posterior.shape[0]))
-            s_dict = {
-                key: result.posterior[key][idx] for key in result.parameter_labels
-            }
-            _mod = model(
-                x=cbins_hi,
-                **s_dict,
-            )
-            # errDict[name] = model_dict['posterior'][name][idx]
-            errmodel.append(_mod)
-        errmodel = np.array(errmodel)
-        low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
-        # med = fitted_line(cbins_hi)
-        plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
-        plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
-
-    plt.hlines(
-        saturate,
-        cbins.value.min(),
-        cbins.value.max(),
-        linestyle="--",
-        color="tab:red",
-        label="Expected saturation ($2\sigma^2$)",
-    )
-    plt.xscale("log")
-    plt.yscale("log")
-    plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
-    plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
-    plt.xlim(bins[0].value, bins[-1].value)
-    plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
-    plt.legend()
-    if save_plots:
-        plt.savefig(
-            os.path.join(outdir, f"{label}_errorbar.pdf"), dpi=300, bbox_inches="tight"
-        )
-
-    plt.figure(facecolor="w")
-    plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
-    plt.xscale("log")
-    plt.yscale("log")
-    plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
-    plt.ylabel(r"Number of source pairs")
-    plt.xlim(bins[0].value, bins[-1].value)
-    if save_plots:
-        plt.savefig(
-            os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
-        )
+    return medians, err_low, err_high, count, c_bins, result
