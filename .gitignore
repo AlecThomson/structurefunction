@@ -158,3 +158,4 @@ slopes.ipynb
 structurefunction.ipynb
 example/outdir
 example/.DS_Store
+outdir/*.json
