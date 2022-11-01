@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-import os
 import inspect
-from typing import Tuple, Union, Callable
-import numpy as np
-from astropy.coordinates import SkyCoord
-import astropy.units as u
-from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
 import itertools
+import logging as logger
+import os
 import warnings
+from typing import Callable, Tuple, Union
+
+import astropy.units as u
 import bilby
-from sigfig import round
 import corner
+import matplotlib.pyplot as plt
+import numba as nb
+import numpy as np
+import pandas as pd
+import xarray as xr
+from astropy.coordinates import SkyCoord
 from astropy.visualization import quantity_support
 from scipy.optimize import curve_fit
-import pandas as pd
-import numba as nb
-import xarray as xr
-import logging as logger
+from sigfig import round
+from tqdm.auto import tqdm
 
 logger.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
@@ -193,7 +194,7 @@ def bilby_fit(
     outdir: str,
     label: str,
     model=broken_power_law,
-    **kwargs
+    **kwargs,
 ) -> bilby.core.result.Result:
     """Bilby fit
 
@@ -318,9 +319,11 @@ def sf_two_point(
     grp = data_xr.groupby_bins("seps", bins)
 
     # Compute Structure Function
-    sf_xr = grp.apply(lambda x: ((x.rm_1 - x.rm_2)**2).mean(dim="source_pair"))
+    sf_xr = grp.apply(lambda x: ((x.rm_1 - x.rm_2) ** 2).mean(dim="source_pair"))
     # Correct for errors
-    sf_err_xr = grp.apply(lambda x: ((x.rm_err_1 - x.rm_err_2)**2).mean(dim="source_pair"))
+    sf_err_xr = grp.apply(
+        lambda x: ((x.rm_err_1 - x.rm_err_2) ** 2).mean(dim="source_pair")
+    )
     sf_corr_xr = sf_xr - sf_err_xr
 
     # Compute error
@@ -330,12 +333,10 @@ def sf_two_point(
     err_high = p2 - med
 
     # Get source pair count
-    count = grp.count(dim="source_pair").rm_1[:,0]
+    count = grp.count(dim="source_pair").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array(
-        [i.mid for i in sf_corr_xr.seps_bins.values]
-    )
+    c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values])
 
     return (
         med.values,
@@ -365,7 +366,6 @@ def sf_three_point(
             rm_2=(["sample", "source_pair"], rm_2),
             rm_err_1=(["sample", "source_pair"], rm_err_1),
             rm_err_2=(["sample", "source_pair"], rm_err_2),
-
         ),
         coords=dict(
             seps=("source_pair", dtheta.to(u.deg)),
@@ -391,13 +391,13 @@ def sf_three_point(
         for _, t in g.groupby("src_1"):
             if len(t["source_pair"]) < 3:
                 continue
-            for j in range(len(t["source_pair"])-1):
-                _rm_1 = t["rm_1"].values[:,0]
-                _rm_2 = t["rm_2"].values[:,j]
-                _rm_3 = t["rm_2"].values[:,j+1]
-                _rm_err_1 = t["rm_err_1"].values[:,0]
-                _rm_err_2 = t["rm_err_2"].values[:,j]
-                _rm_err_3 = t["rm_err_2"].values[:,j+1]
+            for j in range(len(t["source_pair"]) - 1):
+                _rm_1 = t["rm_1"].values[:, 0]
+                _rm_2 = t["rm_2"].values[:, j]
+                _rm_3 = t["rm_2"].values[:, j + 1]
+                _rm_err_1 = t["rm_err_1"].values[:, 0]
+                _rm_err_2 = t["rm_err_2"].values[:, j]
+                _rm_err_3 = t["rm_err_2"].values[:, j + 1]
                 rm_1s.append(_rm_1)
                 rm_2s.append(_rm_2)
                 rm_3s.append(_rm_3)
@@ -422,8 +422,14 @@ def sf_three_point(
     )
 
     triple_grp = triple.groupby("seps")
-    sf_t_xr = triple_grp.apply(lambda x: ((x.rm_2 - 2*x.rm_1 + x.rm_3)**2).mean(dim='source_triplet'))
-    sf_err_t_xr = triple_grp.apply(lambda x: ((x.rm_err_2 - 2*x.rm_err_1 + x.rm_err_3)**2).mean(dim='source_triplet'))
+    sf_t_xr = triple_grp.apply(
+        lambda x: ((x.rm_2 - 2 * x.rm_1 + x.rm_3) ** 2).mean(dim="source_triplet")
+    )
+    sf_err_t_xr = triple_grp.apply(
+        lambda x: ((x.rm_err_2 - 2 * x.rm_err_1 + x.rm_err_3) ** 2).mean(
+            dim="source_triplet"
+        )
+    )
     sf_t_xr_corr = sf_t_xr - sf_err_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
@@ -432,12 +438,10 @@ def sf_three_point(
     err_high = p2 - med
 
     # Get source pair count
-    count = triple_grp.count(dim="source_triplet").rm_1[:,0]
+    count = triple_grp.count(dim="source_triplet").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array(
-        [i for i in sf_t_xr_corr.seps.values]
-    )
+    c_bins = np.array([i for i in sf_t_xr_corr.seps.values])
 
     return (
         med.values,
@@ -446,7 +450,6 @@ def sf_three_point(
         count.values,
         c_bins,
     )
-
 
 
 def structure_function(
@@ -597,11 +600,9 @@ def structure_function(
             outdir=outdir,
             save_plots=save_plots,
             label=model_name,
-
         )
 
     return medians, err_low, err_high, count, c_bins
-
 
 
 def fit_data(
@@ -610,7 +611,7 @@ def fit_data(
     err_high: np.ndarray,
     count: np.ndarray,
     c_bins: np.ndarray,
-    fit: str = 'bilby',
+    fit: str = "bilby",
     outdir: str = None,
     model_name: str = None,
     show_plots: bool = False,
@@ -631,9 +632,7 @@ def fit_data(
     elif model_name == "power_law":
         model = power_law
     else:
-        raise NotImplementedError(
-            "Only implemented for broken_power_law and power_law"
-        )
+        raise NotImplementedError("Only implemented for broken_power_law and power_law")
 
     logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
     # A few simple setup steps
@@ -688,7 +687,9 @@ def fit_data(
         fig = corner.corner(samps, labels=labels, fig=fig)
         if save_plots:
             plt.savefig(
-                os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
+                os.path.join(outdir, f"{label}_corner.pdf"),
+                dpi=300,
+                bbox_inches="tight",
             )
     perc_dict = {
         key: np.nanpercentile(result.posterior[key], [16, 50, 84])
@@ -708,6 +709,7 @@ def fit_data(
     logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
 
     return result, model, outdir
+
 
 #     ##############################################################################
 
