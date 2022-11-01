@@ -290,6 +290,149 @@ def mc_sample(data: np.ndarray, errors: np.ndarray, samples: int = 1000) -> np.n
     return data_dist
 
 
+def sf_two_point(
+    rm_1: np.ndarray,
+    rm_2: np.ndarray,
+    rm_err_1: np.ndarray,
+    rm_err_2: np.ndarray,
+    dtheta: u.Quantity,
+    bins: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+    samples = rm_1.shape[0]
+
+    def _sf_func(x):
+        return ((x.rm_1 - x.rm_2)**2).mean(dim='source_pair')
+
+    def _sf_err_func(x):
+        return ((x.rm_err_1 - x.rm_err_2)**2).mean(dim='source_pair')
+
+
+    data_xr = xr.Dataset(
+        dict(
+            rm_1=(["sample", "source_pair"], rm_1),
+            rm_2=(["sample", "source_pair"], rm_2),
+            rm_err_1=(["sample", "source_pair"], rm_err_1),
+            rm_err_2=(["sample", "source_pair"], rm_err_2),
+        ),
+        coords=dict(
+            seps=("source_pair", dtheta.to(u.deg)),
+            sample=("sample", np.arange(samples)),
+        ),
+    )
+
+    grp = data_xr.groupby_bins("seps", bins)
+
+    sf = grp.apply(_sf_func)
+    sf_err = grp.apply(_sf_err_func)
+    sf_corr = sf - sf_err
+
+    medians = sf_corr.quantile(0.5, dim="sample")
+
+    err_low = medians - sf_corr.quantile(0.16, dim="sample")
+
+    err_high = sf_corr.quantile(0.84, dim="sample") - medians
+
+    count = grp.count(dim="source_pair").rm_1[:,0]
+
+    c_bins = np.array(
+        [i.mid for i in grp.apply(_sf_func).seps_bins.values]
+    )
+
+    return (
+        medians.values,
+        err_low.values,
+        err_high.values,
+        count.values,
+        c_bins,
+    )
+
+
+def sf_three_point(
+    rm_1: np.ndarray,
+    rm_2: np.ndarray,
+    rm_err_1: np.ndarray,
+    rm_err_2: np.ndarray,
+    bins_idx: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+    samples = rm_1.shape[0]
+
+    def _sf_func(x):
+        sf_dist = ((x.rm_2 - 2*x.rm_1 + x.rm_3)**2).mean(dim='source_triplet')
+        sf_err_dist = ((x.rm_err_2 - 2*x.rm_err_1 + x.rm_err_2)**2).mean(dim='source_triplet')
+        sf_corr = sf_dist - sf_err_dist
+        return sf_corr
+
+    data_xr = xr.Dataset(
+        dict(
+            rm_1=(["sample", "source_pair"], rm_1),
+            rm_2=(["sample", "source_pair"], rm_2),
+            rm_err_1=(["sample", "source_pair"], rm_err_1),
+            rm_err_2=(["sample", "source_pair"], rm_err_2),
+        ),
+        coords=dict(
+            bins_idx=("source_pair", bins_idx),
+            sample=("sample", np.arange(samples)),
+        ),
+    )
+
+    grp = data_xr.groupby("bins_idx")
+
+    rm_1s = []
+    rm_2s = []
+    rm_3s = []
+    rm_err_1s = []
+    rm_err_2s = []
+    rm_err_3s = []
+    bins_idxs = []
+    for i, g in tqdm(grp):
+        if i < 0:
+            continue
+        for _, t in g.groupby("src_1"):
+            if len(t["source_pair"]) < 3:
+                continue
+            for j in range(len(t["source_pair"])-1):
+                _rm_1 = t["rm_1"].values[:,0]
+                _rm_2 = t["rm_2"].values[:,j]
+                _rm_3 = t["rm_2"].values[:,j+1]
+                _rm_err_1 = t["rm_err_1"].values[:,0]
+                _rm_err_2 = t["rm_err_2"].values[:,j]
+                _rm_err_3 = t["rm_err_2"].values[:,j+1]
+                rm_1s.append(_rm_1)
+                rm_2s.append(_rm_2)
+                rm_3s.append(_rm_3)
+                rm_err_1s.append(_rm_err_1)
+                rm_err_2s.append(_rm_err_2)
+                rm_err_3s.append(_rm_err_3)
+                b_idx = t.bins_idx.values[0]
+                bins_idxs.append(b_idx)
+
+    triple = xr.Dataset(
+        dict(
+            rm_1=(["source_triplet", "sample"], np.array(rm_1s)),
+            rm_2=(["source_triplet", "sample"], np.array(rm_2s)),
+            rm_3=(["source_triplet", "sample"], np.array(rm_3s)),
+            rm_err_1=(["source_triplet", "sample"], np.array(rm_err_1s)),
+            rm_err_2=(["source_triplet", "sample"], np.array(rm_err_2s)),
+            rm_err_3=(["source_triplet", "sample"], np.array(rm_err_3s)),
+        ),
+        coords=dict(
+            samples=("sample", np.arange(samples)),
+            bins_idx=("source_triplet", bins_idx),
+        ),
+    )
+
+    sf_xr = triple.groupby("bins_idx")
+    medians = sf_xr.apply(_sf_func).quantile(0.5, dim="sample")
+    err_low = medians - sf_xr.apply(_sf_func).quantile(0.16, dim="sample")
+    err_high = sf_xr.apply(_sf_func).quantile(0.84, dim="sample") - medians
+    count = sf_xr.count(dim="source_triplet").rm_1[:,0]
+
+    return medians, err_low, err_high, count
+
+
+
 def structure_function(
     data: u.Quantity,
     errors: u.Quantity,
@@ -302,6 +445,7 @@ def structure_function(
     fit: str = None,
     outdir: str = None,
     model_name: str = None,
+    n_point: int = 2,
     **kwargs,
 ) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
 
@@ -350,16 +494,9 @@ def structure_function(
         samples=samples,
     )
 
-    # Get all combinations of sources and compute the difference
-
-    logger.info("Getting data differences...")
-    diffs_dist = np.subtract(*combinate(rm_dist)).T ** 2
-
-    # Get all combinations of data_errs sources and compute the difference
-
-    logger.info("Getting data error differences...")
-    d_diffs_dist = np.subtract(*combinate(d_rm_dist)).T ** 2
-
+    # Get all combinations of sources
+    rm_1, rm_2 = combinate(rm_dist)
+    d_rm_1, d_rm_2 = combinate(d_rm_dist)
     # Get the angular separation of the source pairs
 
     logger.info("Getting angular separations...")
@@ -385,271 +522,256 @@ def structure_function(
     # Compute the SF
 
     logger.info("Computing SF...")
-    bins_idx = pd.cut(
-        dtheta, bins, include_lowest=True, labels=False, right=True
-    ).astype(int)
-    cbins = np.sqrt(bins[1:] * bins[:-1])  # Take geometric mean of bins - assuming log
 
-    diffs_xr = xr.Dataset(
-        dict(
-            data=(["samples", "source pair"], diffs_dist),
-            error=(["samples", "source pair"], d_diffs_dist),
-        ),
-        coords=dict(
-            bins_idx=("source pair", bins_idx),
-        ),
-    )
-
-    # Compute SF
-    sf_xr = diffs_xr.groupby("bins_idx").mean(dim="source pair")
-    count_xr = diffs_xr["bins_idx"].groupby("bins_idx").count()
-    # Get the final SF correcting for the errors
-    sf_xr_cor = sf_xr.data - sf_xr.error
-    per16_xr, medians_xr, per84_xr = sf_xr_cor.quantile(
-        (0.16, 0.5, 0.84), dim="samples"
-    )
-    # Return to numpy arrays for use later
-    count = np.zeros_like(cbins.value)
-    medians = np.zeros_like(cbins.value)
-    per16 = np.zeros_like(cbins.value)
-    per84 = np.zeros_like(cbins.value)
-    sf_dists_cor = np.zeros((len(cbins), samples))
-    sf_dists = np.zeros((len(cbins), samples))
-    d_sf_dists = np.zeros((len(cbins), samples))
-    for arr, xarr in zip(
-        (count, medians, per16, per84, sf_dists_cor, sf_dists, d_sf_dists),
-        (count_xr, medians_xr, per16_xr, per84_xr, sf_xr_cor, sf_xr.data, sf_xr.error),
-    ):
-        idx = count_xr.coords.to_index()
-        nan_clip = idx >= 0  # Clip NaN indices
-        arr[idx[nan_clip]] = xarr[nan_clip]
-    err_low = medians - per16
-    err_high = per84 - medians
-    err = np.array([err_low.astype(float), err_high.astype(float)])
-    if outdir is None:
-        outdir = "outdir"
-    bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
-    if fit:
-        if model_name is None:
-            model_name = "broken_power_law"
-        if model_name == "broken_power_law":
-            model = broken_power_law
-        elif model_name == "power_law":
-            model = power_law
-        else:
-            raise NotImplementedError(
-                "Only implemented for broken_power_law and power_law"
-            )
-
-        logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
-        # A few simple setup steps
-        label = model_name
-
-        # Only use bins with at least 10 sources
-        cut = (
-            (count >= 10)
-            & np.isfinite(cbins)
-            & np.isfinite(medians)
-            & np.isfinite(err[0])
-            & np.isfinite(err[1])
+    if n_point == 2:
+        medians, err_low, err_high, count = sf_two_point(
+            rm_1=rm_1.T,
+            rm_2=rm_2.T,
+            rm_err_1=d_rm_1.T,
+            rm_err_2=d_rm_2.T,
+            dtheta=dtheta,
+            bins=bins,
         )
-        x = np.array(cbins[cut].value)
-        y = medians[cut]
-        y_err = (per84 - per16)[cut] / 2
-        y_dist = sf_dists_cor[cut]
-
-        if fit == "lsq":
-            result = lsq_fit(
-                x=x,
-                y=y,
-                model=model,
-                outdir=outdir,
-                label=label,
-            )
-        elif fit == "lsq_weight":
-            result = lsq_weight_fit(
-                x=x,
-                y=y,
-                yerr=y_err,
-                model=model,
-                outdir=outdir,
-                label=label,
-            )
-        elif fit == "bilby":
-            result = bilby_fit(
-                x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
-            )
-        else:
-            raise ValueError("Invalid fit type")
-
-        if show_plots:
-            try:
-                result.plot_corner(dpi=300, save=save_plots)
-            except:
-                pass
-            samps = result.samples
-            labels = result.parameter_labels
-            fig = plt.figure(facecolor="w")
-            fig = corner.corner(samps, labels=labels, fig=fig)
-            if save_plots:
-                plt.savefig(
-                    os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
-                )
-        perc_dict = {
-            key: np.nanpercentile(result.posterior[key], [16, 50, 84])
-            for key in result.parameter_labels
-        }
-
-        round_dict = {
-            key: round(
-                perc_dict[key][1].astype(float),
-                uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
-            )
-            for key in result.parameter_labels
-        }
-        logger.info("Fitting results:")
-        for key in round_dict.keys():
-            logger.info(f"{key}: {round_dict[key]}")
-        logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
+    elif n_point == 3:
+        medians, err_low, err_high, count = sf_three_point(
+            rm_1=rm_1.T,
+            rm_2=rm_2.T,
+            rm_err_1=d_rm_1.T,
+            rm_err_2=d_rm_2.T,
+            bins_idx=bins_idx,
+            samples=samples,
+        )
     else:
-        result = None
+        raise NotImplementedError("Only 2 and 3 point SF are implemented.")
 
-    ##############################################################################
 
-    ##############################################################################
-    if show_plots:
-        good_idx = count >= 10
-        plt.figure(facecolor="w")
-        plt.plot(
-            cbins[good_idx],
-            medians[good_idx],
-            ".",
-            c="tab:blue",
-            label="Reliable bins (>= 10 source pairs)",
-        )
-        plt.plot(
-            cbins[~good_idx],
-            medians[~good_idx],
-            ".",
-            c="tab:red",
-            label="Unreliable bins (< 10 source pairs)",
-        )
-        plt.errorbar(
-            cbins.value[good_idx],
-            medians[good_idx],
-            yerr=err[:, good_idx],
-            color="tab:blue",
-            marker=None,
-            fmt=" ",
-        )
-        plt.errorbar(
-            cbins.value[~good_idx],
-            medians[~good_idx],
-            yerr=err[:, ~good_idx],
-            color="tab:red",
-            marker=None,
-            fmt=" ",
-        )
-        if fit:
-            cbins_hi = np.logspace(
-                np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
-            )
-            errmodel = []
-            # Sample the posterior randomly 100 times
-            for i in range(1000):
-                idx = np.random.choice(np.arange(result.posterior.shape[0]))
-                s_dict = {
-                    key: result.posterior[key][idx] for key in result.parameter_labels
-                }
-                _mod = model(
-                    x=cbins_hi,
-                    **s_dict,
-                )
-                # errDict[name] = model_dict['posterior'][name][idx]
-                errmodel.append(_mod)
-            errmodel = np.array(errmodel)
-            low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
-            # med = fitted_line(cbins_hi)
-            plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
-            plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
 
-        saturate = np.nanvar(data) * 2
-        plt.hlines(
-            saturate,
-            cbins.value.min(),
-            cbins.value.max(),
-            linestyle="--",
-            color="tab:red",
-            label="Expected saturation ($2\sigma^2$)",
-        )
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
-        plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
-        plt.xlim(bins[0].value, bins[-1].value)
-        plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
-        plt.legend()
-        if save_plots:
-            plt.savefig(
-                os.path.join(outdir, f"{label}_errorbar.pdf"), dpi=300, bbox_inches="tight"
-            )
 
-        plt.figure(facecolor="w")
-        plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
-        plt.ylabel(r"Number of source pairs")
-        plt.xlim(bins[0].value, bins[-1].value)
-        if save_plots:
-            plt.savefig(
-                os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
-            )
+# def fit_and_stuff():
+#     if outdir is None:
+#         outdir = "outdir"
+#     bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
+#     if fit:
+#         if model_name is None:
+#             model_name = "broken_power_law"
+#         if model_name == "broken_power_law":
+#             model = broken_power_law
+#         elif model_name == "power_law":
+#             model = power_law
+#         else:
+#             raise NotImplementedError(
+#                 "Only implemented for broken_power_law and power_law"
+#             )
 
-        counts = []
-        cor_dists = sf_dists - d_sf_dists
-        plt.figure(facecolor="w")
-        for dist in tqdm(cor_dists, disable=not verbose, desc="Making hist plot"):
-            n, hbins, _ = plt.hist(
-                dist, range=(np.nanmin(cor_dists), np.nanmax(cor_dists)), bins=100
-            )
-            plt.clf()
-            counts.append(n)
-            c_hbins = []
-            for i in range(len(hbins) - 1):
-                c = (hbins[i] + hbins[i + 1]) / 2
-                c_hbins.append(c)
-        counts = np.array(counts)
-        c_hbins = np.array(c_hbins)
+#         logger.info(f"Fitting SF with a {model_name.replace('_',' ')}...")
+#         # A few simple setup steps
+#         label = model_name
 
-        x = cbins
-        y = c_hbins
-        X, Y = np.meshgrid(x, y)
-        plt.figure(facecolor="w")
-        plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r)
-        plt.colorbar()
-        plt.xticks(x)
-        plt.yticks(y)
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
-        plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
-        plt.xlim(bins[0].value, bins[-1].value)
-        plt.ylim(abs(np.nanmin(medians) / 10), np.nanmax(medians) * 10)
-        if fit:
-            plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
-            plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
-        plt.hlines(
-            saturate,
-            cbins.value.min(),
-            cbins.value.max(),
-            linestyle="--",
-            color="tab:red",
-            label="Expected saturation ($2\sigma^2$)",
-        )
-        plt.legend()
-        if save_plots:
-            plt.savefig(os.path.join(outdir, f"{label}_PDF.pdf"), dpi=300, bbox_inches="tight")
-    ##############################################################################
+#         # Only use bins with at least 10 sources
+#         cut = (
+#             (count >= 10)
+#             & np.isfinite(cbins)
+#             & np.isfinite(medians)
+#             & np.isfinite(err[0])
+#             & np.isfinite(err[1])
+#         )
+#         x = np.array(cbins[cut].value)
+#         y = medians[cut]
+#         y_err = (per84 - per16)[cut] / 2
+#         y_dist = sf_dists_cor[cut]
 
-    return cbins, medians, err, count, result
+#         if fit == "lsq":
+#             result = lsq_fit(
+#                 x=x,
+#                 y=y,
+#                 model=model,
+#                 outdir=outdir,
+#                 label=label,
+#             )
+#         elif fit == "lsq_weight":
+#             result = lsq_weight_fit(
+#                 x=x,
+#                 y=y,
+#                 yerr=y_err,
+#                 model=model,
+#                 outdir=outdir,
+#                 label=label,
+#             )
+#         elif fit == "bilby":
+#             result = bilby_fit(
+#                 x=x, y=y, y_err=y_err, model=model, outdir=outdir, label=label, **kwargs
+#             )
+#         else:
+#             raise ValueError("Invalid fit type")
+
+#         if show_plots:
+#             try:
+#                 result.plot_corner(dpi=300, save=save_plots)
+#             except:
+#                 pass
+#             samps = result.samples
+#             labels = result.parameter_labels
+#             fig = plt.figure(facecolor="w")
+#             fig = corner.corner(samps, labels=labels, fig=fig)
+#             if save_plots:
+#                 plt.savefig(
+#                     os.path.join(outdir, f"{label}_corner.pdf"), dpi=300, bbox_inches="tight"
+#                 )
+#         perc_dict = {
+#             key: np.nanpercentile(result.posterior[key], [16, 50, 84])
+#             for key in result.parameter_labels
+#         }
+
+#         round_dict = {
+#             key: round(
+#                 perc_dict[key][1].astype(float),
+#                 uncertainty=(perc_dict[key][2] - perc_dict[key][1]).astype(float),
+#             )
+#             for key in result.parameter_labels
+#         }
+#         logger.info("Fitting results:")
+#         for key in round_dict.keys():
+#             logger.info(f"{key}: {round_dict[key]}")
+#         logger.info(f"Fit log evidence: {result.log_evidence} ± {result.log_evidence_err}")
+#     else:
+#         result = None
+
+#     ##############################################################################
+
+#     ##############################################################################
+#     if show_plots:
+#         good_idx = count >= 10
+#         plt.figure(facecolor="w")
+#         plt.plot(
+#             cbins[good_idx],
+#             medians[good_idx],
+#             ".",
+#             c="tab:blue",
+#             label="Reliable bins (>= 10 source pairs)",
+#         )
+#         plt.plot(
+#             cbins[~good_idx],
+#             medians[~good_idx],
+#             ".",
+#             c="tab:red",
+#             label="Unreliable bins (< 10 source pairs)",
+#         )
+#         plt.errorbar(
+#             cbins.value[good_idx],
+#             medians[good_idx],
+#             yerr=err[:, good_idx],
+#             color="tab:blue",
+#             marker=None,
+#             fmt=" ",
+#         )
+#         plt.errorbar(
+#             cbins.value[~good_idx],
+#             medians[~good_idx],
+#             yerr=err[:, ~good_idx],
+#             color="tab:red",
+#             marker=None,
+#             fmt=" ",
+#         )
+#         if fit:
+#             cbins_hi = np.logspace(
+#                 np.log10(cbins.value.min()), np.log10(cbins.value.max()), 1000
+#             )
+#             errmodel = []
+#             # Sample the posterior randomly 100 times
+#             for i in range(1000):
+#                 idx = np.random.choice(np.arange(result.posterior.shape[0]))
+#                 s_dict = {
+#                     key: result.posterior[key][idx] for key in result.parameter_labels
+#                 }
+#                 _mod = model(
+#                     x=cbins_hi,
+#                     **s_dict,
+#                 )
+#                 # errDict[name] = model_dict['posterior'][name][idx]
+#                 errmodel.append(_mod)
+#             errmodel = np.array(errmodel)
+#             low, med, high = np.percentile(errmodel, [16, 50, 84], axis=0)
+#             # med = fitted_line(cbins_hi)
+#             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
+#             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
+
+#         saturate = np.nanvar(data) * 2
+#         plt.hlines(
+#             saturate,
+#             cbins.value.min(),
+#             cbins.value.max(),
+#             linestyle="--",
+#             color="tab:red",
+#             label="Expected saturation ($2\sigma^2$)",
+#         )
+#         plt.xscale("log")
+#         plt.yscale("log")
+#         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
+#         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
+#         plt.xlim(bins[0].value, bins[-1].value)
+#         plt.ylim(np.nanmin(medians) / 10, np.nanmax(medians) * 10)
+#         plt.legend()
+#         if save_plots:
+#             plt.savefig(
+#                 os.path.join(outdir, f"{label}_errorbar.pdf"), dpi=300, bbox_inches="tight"
+#             )
+
+#         plt.figure(facecolor="w")
+#         plt.plot(cbins, count, ".", color="tab:red", label="Median from MC")
+#         plt.xscale("log")
+#         plt.yscale("log")
+#         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
+#         plt.ylabel(r"Number of source pairs")
+#         plt.xlim(bins[0].value, bins[-1].value)
+#         if save_plots:
+#             plt.savefig(
+#                 os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
+#             )
+
+#         counts = []
+#         cor_dists = sf_dists - d_sf_dists
+#         plt.figure(facecolor="w")
+#         for dist in tqdm(cor_dists, disable=not verbose, desc="Making hist plot"):
+#             n, hbins, _ = plt.hist(
+#                 dist, range=(np.nanmin(cor_dists), np.nanmax(cor_dists)), bins=100
+#             )
+#             plt.clf()
+#             counts.append(n)
+#             c_hbins = []
+#             for i in range(len(hbins) - 1):
+#                 c = (hbins[i] + hbins[i + 1]) / 2
+#                 c_hbins.append(c)
+#         counts = np.array(counts)
+#         c_hbins = np.array(c_hbins)
+
+#         x = cbins
+#         y = c_hbins
+#         X, Y = np.meshgrid(x, y)
+#         plt.figure(facecolor="w")
+#         plt.pcolormesh(X, Y, counts.T, cmap=plt.cm.cubehelix_r)
+#         plt.colorbar()
+#         plt.xticks(x)
+#         plt.yticks(y)
+#         plt.xscale("log")
+#         plt.yscale("log")
+#         plt.xlabel(rf"$\Delta\theta$ [{cbins.unit:latex_inline}]")
+#         plt.ylabel(rf"SF [{data.unit**2:latex_inline}]")
+#         plt.xlim(bins[0].value, bins[-1].value)
+#         plt.ylim(abs(np.nanmin(medians) / 10), np.nanmax(medians) * 10)
+#         if fit:
+#             plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
+#             plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
+#         plt.hlines(
+#             saturate,
+#             cbins.value.min(),
+#             cbins.value.max(),
+#             linestyle="--",
+#             color="tab:red",
+#             label="Expected saturation ($2\sigma^2$)",
+#         )
+#         plt.legend()
+#         if save_plots:
+#             plt.savefig(os.path.join(outdir, f"{label}_PDF.pdf"), dpi=300, bbox_inches="tight")
+#     ##############################################################################
+
+#     return cbins, medians, err, count, result
