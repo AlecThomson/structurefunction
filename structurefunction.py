@@ -356,6 +356,7 @@ def sf_three_point(
     src_2: np.ndarray,
     dtheta: u.Quantity,
     bins: np.ndarray,
+    verbose: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
     samples = rm_1.shape[0]
@@ -385,7 +386,7 @@ def sf_three_point(
     rm_err_2s = []
     rm_err_3s = []
     centres = []
-    for i, g in tqdm(grp):
+    for i, g in tqdm(grp, desc="Grouping triplets", disable=not verbose):
         if len(g.source_pair) < 0:
             continue
         for _, t in g.groupby("src_1"):
@@ -433,7 +434,6 @@ def sf_three_point(
     )
 
     sf_t_xr_corr = sf_t_xr - sf_err_t_xr
-    sf_t_xr_corr = sf_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
 
@@ -784,6 +784,7 @@ def structure_function(
             src_2=src_2,
             dtheta=dtheta,
             bins=bins,
+            verbose=verbose,
         )
         saturate = np.nanvar(data) * 6
     else:
@@ -799,6 +800,7 @@ def structure_function(
         fit=fit,
         outdir=outdir,
         model_name=model_name,
+        n_point=n_point,
         show_plots=show_plots,
         save_plots=save_plots,
         **kwargs,
