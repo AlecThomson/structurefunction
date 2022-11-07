@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import inspect
+import io
 import itertools
 import logging as logger
 import os
 import warnings
-from typing import Callable, Tuple, Union
+from typing import Callable, NamedTuple, Tuple, Union
 
 import astropy.units as u
 import bilby
@@ -19,9 +20,7 @@ from astropy.visualization import quantity_support
 from scipy.optimize import curve_fit
 from sigfig import round
 from tqdm import tqdm
-import io
 from tqdm.contrib.logging import logging_redirect_tqdm
-from typing import NamedTuple
 
 SFResult = NamedTuple(
     "SFResult",
@@ -31,27 +30,33 @@ SFResult = NamedTuple(
         ("err_high", np.ndarray),
         ("count", np.ndarray),
         ("c_bins", np.ndarray),
-    ]
+    ],
 )
+
 
 class TqdmToLogger(io.StringIO):
     """
-        Output stream for TQDM which will output to logger module instead of
-        the StdOut.
+    Output stream for TQDM which will output to logger module instead of
+    the StdOut.
     """
+
     logger = None
     level = None
-    buf = ''
-    def __init__(self,logger,level=None):
+    buf = ""
+
+    def __init__(self, logger, level=None):
         super(TqdmToLogger, self).__init__()
         self.logger = logger
         self.level = level or logger.INFO
-    def write(self,buf):
-        self.buf = buf.strip('\r\n\t ')
+
+    def write(self, buf):
+        self.buf = buf.strip("\r\n\t ")
+
     def flush(self):
         self.logger.log(self.level, self.buf)
 
-tqdm_out = TqdmToLogger(logger,level=logger.INFO)
+
+tqdm_out = TqdmToLogger(logger, level=logger.INFO)
 logger.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -458,13 +463,13 @@ def sf_three_point(
                 t = g.where(g[f"src_{s1}"] == _src_a, drop=True)
                 if len(t[f"src_{s1}"]) < 1:
                     continue
-                _rm_1 = t[f"rm_{s1}"][:,0].values
-                _rm_err_1= t[f"rm_err_{s1}"][:,0].values
-                for j in range(ca-1):
-                    _rm_2 = t[f"rm_{s2}"][:,j].values
-                    _rm_3 = t[f"rm_{s2}"][:,j+1].values
-                    _rm_err_2 = t[f"rm_err_{s2}"][:,j].values
-                    _rm_err_3 = t[f"rm_err_{s2}"][:,j+1].values
+                _rm_1 = t[f"rm_{s1}"][:, 0].values
+                _rm_err_1 = t[f"rm_err_{s1}"][:, 0].values
+                for j in range(ca - 1):
+                    _rm_2 = t[f"rm_{s2}"][:, j].values
+                    _rm_3 = t[f"rm_{s2}"][:, j + 1].values
+                    _rm_err_2 = t[f"rm_err_{s2}"][:, j].values
+                    _rm_err_3 = t[f"rm_err_{s2}"][:, j + 1].values
 
                     rm_1s.append(_rm_1)
                     rm_2s.append(_rm_2)
@@ -530,7 +535,7 @@ def fit_data(
     fit: str = "bilby",
     outdir: str = None,
     model_name: str = None,
-    n_point: int=2,
+    n_point: int = 2,
     show_plots: bool = False,
     save_plots: bool = False,
     **kwargs,
@@ -648,7 +653,6 @@ def fit_data(
     return result, model, outdir
 
 
-
 def plot_sf(
     data: u.Quantity,
     bins: u.Quantity,
@@ -663,7 +667,7 @@ def plot_sf(
     n_point: int = 2,
 ):
     medians, err_low, err_high, count, cbins = sf_result
-    word = "pairs" if n_point==2 else "triplets"
+    word = "pairs" if n_point == 2 else "triplets"
     good_idx = count >= 10
     plt.figure(facecolor="w")
     plt.plot(
@@ -723,7 +727,9 @@ def plot_sf(
         saturate,
         linestyle="--",
         color="tab:red",
-        label="Expected saturation ($2\sigma^2$)" if n_point==2 else "Expected saturation ($6\sigma^2$)",
+        label="Expected saturation ($2\sigma^2$)"
+        if n_point == 2
+        else "Expected saturation ($6\sigma^2$)",
     )
     plt.xscale("log")
     plt.yscale("log")
@@ -748,7 +754,6 @@ def plot_sf(
         plt.savefig(
             os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
         )
-
 
 
 def structure_function(
@@ -807,7 +812,7 @@ def structure_function(
     )
     d_rm_dist = mc_sample(
         data=errors.value.astype(np.float64),
-        errors=errors.value.astype(np.float64), # Yo dawg...
+        errors=errors.value.astype(np.float64),  # Yo dawg...
         samples=samples,
     )
 
