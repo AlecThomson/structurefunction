@@ -1,3 +1,5 @@
+[![Documentation Status](https://readthedocs.org/projects/structurefunction/badge/?version=latest)](https://structurefunction.readthedocs.io/en/latest/?badge=latest)
+
 # StructureFunction
 
 Efficient computation of structure functions for astronomical data with errors.
