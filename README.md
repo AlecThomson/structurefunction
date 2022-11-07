@@ -1,3 +1,5 @@
+[![Documentation Status](https://readthedocs.org/projects/structurefunction/badge/?version=latest)](https://structurefunction.readthedocs.io/en/latest/?badge=latest)
+
 # StructureFunction
 
 Efficient computation of structure functions for astronomical data with errors.
@@ -8,15 +10,23 @@ I follow the definitions laid out by [Haverkorn et al. 2004](https://ui.adsabs.h
 
 The second-order structure function of RM is given by:
 
-$$ SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}{(\theta + \delta\theta)}]^2\rangle $$
+```math
+SF_{\text{RM},\text{obs}}(\delta\theta) = \langle[\text{RM}{(\theta)} - \text{RM}{(\theta + \delta\theta)}]^2\rangle
+```
 
 That is, the ensemble average of the squared-difference in RM for sources with angular seperation $\delta\theta$. We also need to correct for the impact of errors by:
 
-$$ SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta) $$
+```math
+SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta)
+```
 
 Computing the error on the structure function is diffifcult. Here I use Monte-Carlo error propagation to compute the errors numerically.
 
 I provide the ability to fit a broken power-law to the data using both standard least-squares, and full-blown MCMC fitting powered by [bilby](https://lscsoft.docs.ligo.org/bilby/).
+
+## Documentation
+
+The documentation is available [here](https://structurefunction.readthedocs.io/en/latest/).
 
 ## Installation
 
