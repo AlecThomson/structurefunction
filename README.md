@@ -22,6 +22,10 @@ Computing the error on the structure function is diffifcult. Here I use Monte-Ca
 
 I provide the ability to fit a broken power-law to the data using both standard least-squares, and full-blown MCMC fitting powered by [bilby](https://lscsoft.docs.ligo.org/bilby/).
 
+## Documentation
+
+The documentation is available [here](https://structurefunction.readthedocs.io/en/latest/).
+
 ## Installation
 
 To get the latest version from this repo
