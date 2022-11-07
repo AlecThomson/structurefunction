@@ -18,8 +18,28 @@ from astropy.coordinates import SkyCoord
 from astropy.visualization import quantity_support
 from scipy.optimize import curve_fit
 from sigfig import round
-from tqdm.auto import tqdm
+from tqdm import tqdm
+import io
+from tqdm.contrib.logging import logging_redirect_tqdm
 
+class TqdmToLogger(io.StringIO):
+    """
+        Output stream for TQDM which will output to logger module instead of
+        the StdOut.
+    """
+    logger = None
+    level = None
+    buf = ''
+    def __init__(self,logger,level=None):
+        super(TqdmToLogger, self).__init__()
+        self.logger = logger
+        self.level = level or logger.INFO
+    def write(self,buf):
+        self.buf = buf.strip('\r\n\t ')
+    def flush(self):
+        self.logger.log(self.level, self.buf)
+
+tqdm_out = TqdmToLogger(logger,level=logger.INFO)
 logger.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -354,6 +374,8 @@ def sf_three_point(
     rm_err_2: np.ndarray,
     src_1: np.ndarray,
     src_2: np.ndarray,
+    crd_1: SkyCoord,
+    crd_2: SkyCoord,
     dtheta: u.Quantity,
     bins: np.ndarray,
     verbose: bool = False,
@@ -373,6 +395,8 @@ def sf_three_point(
             sample=("sample", np.arange(samples)),
             src_1=("source_pair", src_1),
             src_2=("source_pair", src_2),
+            crd_1=("source_pair", crd_1),
+            crd_2=("source_pair", crd_2),
         ),
     )
 
@@ -386,13 +410,20 @@ def sf_three_point(
     rm_err_2s = []
     rm_err_3s = []
     centres = []
-    for i, g in tqdm(grp, desc="Grouping triplets", disable=not verbose):
+    for i, g in tqdm(grp, desc="Grouping triplets", file=tqdm_out):
         if len(g.source_pair) < 0:
             continue
         for _, t in g.groupby("src_1"):
             if len(t["source_pair"]) < 3:
                 continue
             for j in range(len(t["source_pair"]) - 1):
+                _crd_1 = t["crd_1"][0]
+                _crd_2 = t["crd_2"][j]
+                _crd_3 = t["crd_2"][j + 1]
+                _sep = _crd_2.separation(_crd_3)
+                # Check if _sep is within the bin
+                if (_sep < i.right * u.deg) or (_sep > i.right * u.deg):
+                    continue
                 _rm_1 = t["rm_1"].values[:, 0]
                 _rm_2 = t["rm_2"].values[:, j]
                 _rm_3 = t["rm_2"].values[:, j + 1]
@@ -432,8 +463,9 @@ def sf_three_point(
             dim="source_triplet"
         )
     )
-
+    logger.warning("Not correcting for errors in three point SF")
     sf_t_xr_corr = sf_t_xr - sf_err_t_xr
+    # sf_t_xr_corr = sf_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
 
@@ -638,10 +670,8 @@ def plot_sf(
         plt.plot(cbins_hi, med, "-", color="tab:orange", label="Best fit")
         plt.fill_between(cbins_hi, low, high, color="tab:orange", alpha=0.5)
 
-    plt.hlines(
+    plt.axhline(
         saturate,
-        cbins.value.min(),
-        cbins.value.max(),
         linestyle="--",
         color="tab:red",
         label="Expected saturation ($2\sigma^2$)" if n_point==2 else "Expected saturation ($6\sigma^2$)",
@@ -718,6 +748,8 @@ def structure_function(
             datefmt="%Y-%m-%d %H:%M:%S",
             force=True,
         )
+    else:
+        logger.basicConfig(level=logger.ERROR)
 
     # Sample the errors assuming a Gaussian distribution
 
@@ -782,6 +814,8 @@ def structure_function(
             rm_err_2=d_rm_2.T,
             src_1=src_1,
             src_2=src_2,
+            crd_1=coords_1,
+            crd_2=coords_2,
             dtheta=dtheta,
             bins=bins,
             verbose=verbose,
