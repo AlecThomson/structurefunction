@@ -21,6 +21,18 @@ from sigfig import round
 from tqdm import tqdm
 import io
 from tqdm.contrib.logging import logging_redirect_tqdm
+from typing import NamedTuple
+
+SFResult = NamedTuple(
+    "SFResult",
+    [
+        ("med", np.ndarray),
+        ("err_low", np.ndarray),
+        ("err_high", np.ndarray),
+        ("count", np.ndarray),
+        ("c_bins", np.ndarray),
+    ]
+)
 
 class TqdmToLogger(io.StringIO):
     """
@@ -317,9 +329,21 @@ def sf_two_point(
     rm_err_1: np.ndarray,
     rm_err_2: np.ndarray,
     dtheta: u.Quantity,
-    bins: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    bins: u.Quantity,
+) -> SFResult:
+    """Compute the two-point structure function
 
+    Args:
+        rm_1 (np.ndarray): RMs of source 1 in pair (n_samples, n_pairs)
+        rm_2 (np.ndarray): RMs of source 2 in pair (n_samples, n_pairs)
+        rm_err_1 (np.ndarray): RM errors of source 1 in pair (n_samples, n_pairs)
+        rm_err_2 (np.ndarray): RM errors of source 2 in pair (n_samples, n_pairs)
+        dtheta (u.Quantity): Separation between sources in pair (n_pairs)
+        bins (u.Quantity): Angular separation bins
+
+    Returns:
+        SFResult: Structure function results
+    """
     samples = rm_1.shape[0]
 
     data_xr = xr.Dataset(
@@ -358,7 +382,7 @@ def sf_two_point(
     # Get bin centers
     c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values]) * u.deg
 
-    return (
+    return SFResult(
         med.values,
         err_low.values,
         err_high.values,
@@ -374,13 +398,24 @@ def sf_three_point(
     rm_err_2: np.ndarray,
     src_1: np.ndarray,
     src_2: np.ndarray,
-    crd_1: SkyCoord,
-    crd_2: SkyCoord,
     dtheta: u.Quantity,
-    bins: np.ndarray,
-    verbose: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    bins: u.Quantity,
+) -> SFResult:
+    """Compute the three-point structure function
 
+    Args:
+        rm_1 (np.ndarray): RMs of source 1 in pair (n_samples, n_pairs)
+        rm_2 (np.ndarray): RMs of source 2 in pair (n_samples, n_pairs)
+        rm_err_1 (np.ndarray): RM errors of source 1 in pair (n_samples, n_pairs)
+        rm_err_2 (np.ndarray): RM errors of source 2 in pair (n_samples, n_pairs)
+        src_1 (np.ndarray): Source 1 in pair (n_pairs)
+        src_2 (np.ndarray): Source 2 in pair (n_pairs)
+        dtheta (u.Quantity): Separation between sources in pair (n_pairs)
+        bins (u.Quantity): Angular separation bins
+
+    Returns:
+        SFResult: Structure function result
+    """
     samples = rm_1.shape[0]
 
     data_xr = xr.Dataset(
@@ -395,8 +430,6 @@ def sf_three_point(
             sample=("sample", np.arange(samples)),
             src_1=("source_pair", src_1),
             src_2=("source_pair", src_2),
-            crd_1=("source_pair", crd_1),
-            crd_2=("source_pair", crd_2),
         ),
     )
 
@@ -410,34 +443,38 @@ def sf_three_point(
     rm_err_2s = []
     rm_err_3s = []
     centres = []
-    for i, g in tqdm(grp, desc="Grouping triplets", file=tqdm_out):
-        if len(g.source_pair) < 0:
-            continue
-        for _, t in g.groupby("src_1"):
-            if len(t["source_pair"]) < 3:
-                continue
-            for j in range(len(t["source_pair"]) - 1):
-                _crd_1 = t["crd_1"][0]
-                _crd_2 = t["crd_2"][j]
-                _crd_3 = t["crd_2"][j + 1]
-                _sep = _crd_2.separation(_crd_3)
-                # Check if _sep is within the bin
-                if (_sep < i.right * u.deg) or (_sep > i.right * u.deg):
-                    continue
-                _rm_1 = t["rm_1"].values[:, 0]
-                _rm_2 = t["rm_2"].values[:, j]
-                _rm_3 = t["rm_2"].values[:, j + 1]
-                _rm_err_1 = t["rm_err_1"].values[:, 0]
-                _rm_err_2 = t["rm_err_2"].values[:, j]
-                _rm_err_3 = t["rm_err_2"].values[:, j + 1]
-                rm_1s.append(_rm_1)
-                rm_2s.append(_rm_2)
-                rm_3s.append(_rm_3)
-                rm_err_1s.append(_rm_err_1)
-                rm_err_2s.append(_rm_err_2)
-                rm_err_3s.append(_rm_err_3)
-                centres.append(i.mid)
 
+    for i, g in tqdm(grp, desc="Grouping triplets", file=tqdm_out):
+        # Find repeats of source number in each pair
+        # If a source is repeated, then a triple is formed
+        src_1s, count_1s = np.unique(g.src_1.values, return_counts=True)
+        src_2s, count_2s = np.unique(g.src_2.values, return_counts=True)
+
+        for s, (srcs, counts) in enumerate(zip([src_1s, src_2s], [count_1s, count_2s])):
+            # Loop over src 1 then src 2
+            s1 = 1 if s == 0 else 2
+            s2 = 2 if s == 0 else 1
+            for _src_a, ca in zip(srcs[counts > 1], counts[counts > 1]):
+                t = g.where(g[f"src_{s1}"] == _src_a, drop=True)
+                if len(t[f"src_{s1}"]) < 1:
+                    continue
+                _rm_1 = t[f"rm_{s1}"][:,0].values
+                _rm_err_1= t[f"rm_err_{s1}"][:,0].values
+                for j in range(ca-1):
+                    _rm_2 = t[f"rm_{s2}"][:,j].values
+                    _rm_3 = t[f"rm_{s2}"][:,j+1].values
+                    _rm_err_2 = t[f"rm_err_{s2}"][:,j].values
+                    _rm_err_3 = t[f"rm_err_{s2}"][:,j+1].values
+
+                    rm_1s.append(_rm_1)
+                    rm_2s.append(_rm_2)
+                    rm_3s.append(_rm_3)
+                    rm_err_1s.append(_rm_err_1)
+                    rm_err_2s.append(_rm_err_2)
+                    rm_err_3s.append(_rm_err_3)
+                    centres.append(i.mid)
+
+    # Create triplets dataset
     triple = xr.Dataset(
         dict(
             rm_1=(["source_triplet", "sample"], np.array(rm_1s)),
@@ -453,7 +490,9 @@ def sf_three_point(
         ),
     )
 
+    # Groupby separtion 'bin'
     triple_grp = triple.groupby("seps")
+    # Compute Structure Function
     sf_t_xr = triple_grp.apply(
         lambda x: ((x.rm_2 - 2 * x.rm_1 + x.rm_3) ** 2).mean(dim="source_triplet")
     )
@@ -463,9 +502,8 @@ def sf_three_point(
             dim="source_triplet"
         )
     )
-    logger.warning("Not correcting for errors in three point SF")
+    logger.warning("Correcting for errors in three point SF")
     sf_t_xr_corr = sf_t_xr - sf_err_t_xr
-    # sf_t_xr_corr = sf_t_xr
 
     p1, med, p2 = sf_t_xr_corr.quantile([0.16, 0.5, 0.84], dim="sample")
 
@@ -478,7 +516,7 @@ def sf_three_point(
     # Get bin centers
     c_bins = np.array([i for i in sf_t_xr_corr.seps.values]) * u.deg
 
-    return (
+    return SFResult(
         med.values,
         err_low.values,
         err_high.values,
@@ -488,11 +526,7 @@ def sf_three_point(
 
 
 def fit_data(
-    medians: np.ndarray,
-    err_low: np.ndarray,
-    err_high: np.ndarray,
-    count: np.ndarray,
-    c_bins: np.ndarray,
+    sf_result: SFResult,
     fit: str = "bilby",
     outdir: str = None,
     model_name: str = None,
@@ -501,9 +535,29 @@ def fit_data(
     save_plots: bool = False,
     **kwargs,
 ) -> Union[None, bilby.core.result.Result]:
+    """Fit the structure function data
+
+    Args:
+        sf_result (SFResult): Structure function result
+        fit (str, optional): Fit type. Defaults to "bilby".
+        outdir (str, optional): Output directory for bilby. Defaults to None.
+        model_name (str, optional): Model to fit. Defaults to None.
+        n_point (int, optional): Number of points in SF. Defaults to 2.
+        show_plots (bool, optional): Show fitting plots. Defaults to False.
+        save_plots (bool, optional): Save fitting plots. Defaults to False.
+
+    Raises:
+        NotImplementedError: If model_name is not implemented
+        ValueError: If fit is not implemented.
+
+    Returns:
+        Union[None, bilby.core.result.Result]: _description_
+    """
     if outdir is None:
         outdir = "outdir"
     bilby.utils.check_directory_exists_and_if_not_mkdir(outdir)
+
+    medians, err_low, err_high, count, c_bins = sf_result
 
     if not fit:
         return None, None, outdir
@@ -594,17 +648,11 @@ def fit_data(
     return result, model, outdir
 
 
-#     ##############################################################################
 
-#     ##############################################################################
 def plot_sf(
     data: u.Quantity,
     bins: u.Quantity,
-    count: np.ndarray,
-    cbins: np.ndarray,
-    medians: np.ndarray,
-    err_low: np.ndarray,
-    err_high: np.ndarray,
+    sf_result: SFResult,
     saturate: float,
     fit: str = None,
     result: bilby.core.result.Result = None,
@@ -614,6 +662,7 @@ def plot_sf(
     label: str = "",
     n_point: int = 2,
 ):
+    medians, err_low, err_high, count, cbins = sf_result
     word = "pairs" if n_point==2 else "triplets"
     good_idx = count >= 10
     plt.figure(facecolor="w")
@@ -716,9 +765,9 @@ def structure_function(
     model_name: str = None,
     n_point: int = 2,
     **kwargs,
-) -> Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
+) -> Tuple[SFResult, bilby.core.result.Result]:
 
-    """Compute the second order structure function with Monte-Carlo error propagation.
+    """Compute the second or third order structure function with Monte-Carlo error propagation.
 
     Args:
         data (u.Quantity): 1D array of data values.
@@ -727,6 +776,7 @@ def structure_function(
         samples (int): Number of samples to use for Monte-Carlo error propagation.
         bins (Union[u.Quantity, int]): Bin edges of the structure function, or number of bins.
         show_plots (bool, optional): Show plots. Defaults to False.
+        save_plots (bool, optional): Save plots. Defaults to False.
         verbose (bool, optional): Print progress. Defaults to False.
         fit (str, optional): How to fit the broken powerlaw. Can be 'astropy', 'astropy_mc' or 'bilby'. Defaults to None.
         outdir (str, optional): Output directory for bilby. Defaults to None.
@@ -734,11 +784,7 @@ def structure_function(
         **kwargs: Additional keyword arguments to pass to the bilby.core.run_sampler function.
 
     Returns:
-        Tuple[u.Quantity, u.Quantity, Tuple[u.Quantity, u.Quantity], np.ndarray]:
-            cbins: center of bins.
-            medians: median of the structure function.
-            errors: upper and lower error of the structure function.
-            counts: number of source pairs in each bin.
+        Tuple[SFResult, bilby.core.result.Result]: The structure function result and the fitting result.
     """
 
     if verbose:
@@ -795,7 +841,7 @@ def structure_function(
     logger.info("Computing SF...")
 
     if n_point == 2:
-        medians, err_low, err_high, count, c_bins = sf_two_point(
+        sf_result = sf_two_point(
             rm_1=rm_1.T,
             rm_2=rm_2.T,
             rm_err_1=d_rm_1.T,
@@ -807,18 +853,15 @@ def structure_function(
     elif n_point == 3:
         source_ids = np.arange(len(coords))
         src_1, src_2 = combinate(source_ids)
-        medians, err_low, err_high, count, c_bins = sf_three_point(
+        sf_result = sf_three_point(
             rm_1=rm_1.T,
             rm_2=rm_2.T,
             rm_err_1=d_rm_1.T,
             rm_err_2=d_rm_2.T,
             src_1=src_1,
             src_2=src_2,
-            crd_1=coords_1,
-            crd_2=coords_2,
             dtheta=dtheta,
             bins=bins,
-            verbose=verbose,
         )
         saturate = np.nanvar(data) * 6
     else:
@@ -826,11 +869,7 @@ def structure_function(
 
     # Fit the SF
     result, model, outdir = fit_data(
-        medians=medians,
-        err_low=err_low,
-        err_high=err_high,
-        count=count,
-        c_bins=c_bins,
+        sf_result=sf_result,
         fit=fit,
         outdir=outdir,
         model_name=model_name,
@@ -844,11 +883,7 @@ def structure_function(
         plot_sf(
             data=data,
             bins=bins,
-            count=count,
-            cbins=c_bins,
-            medians=medians,
-            err_low=err_low,
-            err_high=err_high,
+            sf_result=sf_result,
             saturate=saturate,
             fit=fit,
             result=result,
@@ -859,4 +894,4 @@ def structure_function(
             n_point=n_point,
         )
 
-    return medians, err_low, err_high, count, c_bins, result
+    return sf_result, result
