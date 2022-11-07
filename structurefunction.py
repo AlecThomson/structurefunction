@@ -22,6 +22,10 @@ from sigfig import round
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+####################################
+### Helper functions and classes ###
+####################################
+
 SFResult = NamedTuple(
     "SFResult",
     [
@@ -327,6 +331,9 @@ def mc_sample(data: np.ndarray, errors: np.ndarray, samples: int = 1000) -> np.n
         data_dist[i] = np.random.normal(loc=data[i], scale=errors[i], size=samples)
     return data_dist
 
+############################
+### SF compute functions ###
+############################
 
 def sf_two_point(
     rm_1: np.ndarray,
@@ -755,6 +762,9 @@ def plot_sf(
             os.path.join(outdir, f"{label}_counts.pdf"), dpi=300, bbox_inches="tight"
         )
 
+#####################
+### Main function ###
+#####################
 
 def structure_function(
     data: u.Quantity,
