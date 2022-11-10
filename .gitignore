@@ -158,3 +158,12 @@ slopes.ipynb
 structurefunction.ipynb
 example/outdir
 example/.DS_Store
+outdir/*.json
+old_test.ipynb
+triple_dev.ipynb
+triple_test.ipynb
+lmc.ipynb
+uncle_timmy.pickle
+example/lmc_data_table.csv
+lmc/broken_power_law_2_point_result.json
+lmc/broken_power_law_3_point_result.json
