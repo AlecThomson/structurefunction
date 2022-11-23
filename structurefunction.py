@@ -15,7 +15,7 @@ import numba as nb
 import numpy as np
 import pandas as pd
 import xarray as xr
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, UnitSphericalRepresentation
 from astropy.visualization import quantity_support
 from scipy.optimize import curve_fit
 from sigfig import round
@@ -342,6 +342,7 @@ def sf_two_point(
     rm_err_2: np.ndarray,
     dtheta: u.Quantity,
     bins: u.Quantity,
+    bin_unit: u.Quantity,
 ) -> SFResult:
     """Compute the two-point structure function
 
@@ -351,7 +352,8 @@ def sf_two_point(
         rm_err_1 (np.ndarray): RM errors of source 1 in pair (n_samples, n_pairs)
         rm_err_2 (np.ndarray): RM errors of source 2 in pair (n_samples, n_pairs)
         dtheta (u.Quantity): Separation between sources in pair (n_pairs)
-        bins (u.Quantity): Angular separation bins
+        bins (u.Quantity): Angular (or 3D Euclidean) separation bins
+        bin_unit (u.Quantity): Unit to set bins to when resolving units
 
     Returns:
         SFResult: Structure function results
@@ -366,13 +368,13 @@ def sf_two_point(
             rm_err_2=(["sample", "source_pair"], rm_err_2),
         ),
         coords=dict(
-            seps=("source_pair", dtheta.to(u.deg)),
+            seps=("source_pair", dtheta.to(bin_unit)),
             sample=("sample", np.arange(samples)),
         ),
     )
 
     # Groupby separation
-    grp = data_xr.groupby_bins("seps", bins.to(u.deg).value)
+    grp = data_xr.groupby_bins("seps", bins.to(bin_unit).value)
 
     # Compute Structure Function
     sf_xr = grp.apply(lambda x: ((x.rm_1 - x.rm_2) ** 2).mean(dim="source_pair"))
@@ -392,7 +394,7 @@ def sf_two_point(
     count = grp.count(dim="source_pair").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values]) * u.deg
+    c_bins = np.array([i.mid for i in sf_corr_xr.seps_bins.values]) * bin_unit
 
     return SFResult(
         med.values,
@@ -412,6 +414,7 @@ def sf_three_point(
     src_2: np.ndarray,
     dtheta: u.Quantity,
     bins: u.Quantity,
+    bin_unit: u.Quantity,
 ) -> SFResult:
     """Compute the three-point structure function
 
@@ -423,7 +426,8 @@ def sf_three_point(
         src_1 (np.ndarray): Source 1 in pair (n_pairs)
         src_2 (np.ndarray): Source 2 in pair (n_pairs)
         dtheta (u.Quantity): Separation between sources in pair (n_pairs)
-        bins (u.Quantity): Angular separation bins
+        bins (u.Quantity): Angular (or 3D Euclidean) separation bins
+        bin_unit (u.Quantity): Unit to set bins to when resolving units
 
     Returns:
         SFResult: Structure function result
@@ -438,7 +442,7 @@ def sf_three_point(
             rm_err_2=(["sample", "source_pair"], rm_err_2),
         ),
         coords=dict(
-            seps=("source_pair", dtheta.to(u.deg)),
+            seps=("source_pair", dtheta.to(bin_unit)),
             sample=("sample", np.arange(samples)),
             src_1=("source_pair", src_1),
             src_2=("source_pair", src_2),
@@ -446,7 +450,7 @@ def sf_three_point(
     )
 
     # Groupby separation
-    grp = data_xr.groupby_bins("seps", bins.to(u.deg).value)
+    grp = data_xr.groupby_bins("seps", bins.to(bin_unit).value)
 
     rm_1s = []
     rm_2s = []
@@ -526,7 +530,7 @@ def sf_three_point(
     count = triple_grp.count(dim="source_triplet").rm_1[:, 0]
 
     # Get bin centers
-    c_bins = np.array([i for i in sf_t_xr_corr.seps.values]) * u.deg
+    c_bins = np.array([i for i in sf_t_xr_corr.seps.values]) * bin_unit
 
     return SFResult(
         med.values,
@@ -831,22 +835,45 @@ def structure_function(
     d_rm_1, d_rm_2 = combinate(d_rm_dist)
     # Get the angular separation of the source pairs
 
+    # Check if coords have distance
+    has_distance = issubclass(
+        coords.data.__class__,
+        UnitSphericalRepresentation,
+    )
+
     logger.info("Getting angular separations...")
     ra_1, ra_2 = combinate(coords.ra)
     dec_1, dec2 = combinate(coords.dec)
+    if has_distance:
+        dist_1, dist_2 = combinate(
+            coords.distance
+        )
 
-    coords_1 = SkyCoord(ra_1, dec_1)
-    coords_2 = SkyCoord(ra_2, dec2)
-    dtheta = coords_1.separation(coords_2)
+    coords_1 = SkyCoord(
+        ra_1,
+        dec_1,
+        distance=dist_1 if has_distance else None,
+    )
+    coords_2 = SkyCoord(
+        ra_2,
+        dec2,
+        distance=dist_2 if has_distance else None,
+    )
+    if has_distance:
+        dtheta = coords_1.separation_3d(coords_2)
+        bin_unit = u.pc
+    else:
+        dtheta = coords_1.separation(coords_2)
+        bin_unit = u.deg
 
     # Auto compute bins
     if type(bins) is int:
 
         logger.info("Auto-computing bins...")
         nbins = bins
-        start = np.log10(np.min(dtheta).to(u.deg).value)
-        stop = np.log10(np.max(dtheta).to(u.deg).value)
-        bins = np.logspace(start, stop, nbins, endpoint=True) * u.deg
+        start = np.log10(np.min(dtheta).to(bin_unit).value)
+        stop = np.log10(np.max(dtheta).to(bin_unit).value)
+        bins = np.logspace(start, stop, nbins, endpoint=True) * bin_unit
         logger.info(f"Maximal angular separation: {np.max(dtheta)}")
         logger.info(f"Minimal angular separation: {np.min(dtheta)}")
     else:
@@ -863,6 +890,7 @@ def structure_function(
             rm_err_2=d_rm_2.T,
             dtheta=dtheta,
             bins=bins,
+            bin_unit=bin_unit,
         )
         saturate = np.nanvar(data) * 2
     elif n_point == 3:
@@ -877,6 +905,7 @@ def structure_function(
             src_2=src_2,
             dtheta=dtheta,
             bins=bins,
+            bin_unit=bin_unit,
         )
         saturate = np.nanvar(data) * 6
     else:
