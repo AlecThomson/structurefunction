@@ -1,3 +1,5 @@
+Example usage
+=============
 .. code:: ipython3
 
     %matplotlib inline
@@ -20,7 +22,7 @@ That is, the ensemble average of the squared-difference in RM for
 sources with angular seperation :math:`\delta\theta`. We also need to
 correct for the impact of errors by:
 
-.. math::  SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta) 
+.. math::  SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta)
 
 See Haverkorn et al. 2004 (2004ApJ…609..776H) for details.
 
@@ -41,15 +43,15 @@ the paper’s plots using a web plot digitiser.
                         2.2444782900152482,
                         2.2476963207124476,
                         2.2837806390213578,]) * (u.rad / u.m**2)**2
-    mao_sep = 10**np.array([-0.7729091483767441, 
-                        -0.5386163683663935, 
-                        -0.2730532911440767, 
-                        -0.02550632317850443, 
-                        0.21819567988496358, 
-                        0.47213008276920787, 
-                        0.7173429798998987, 
-                        0.9643533199726302, 
-                        1.18882007856649, 
+    mao_sep = 10**np.array([-0.7729091483767441,
+                        -0.5386163683663935,
+                        -0.2730532911440767,
+                        -0.02550632317850443,
+                        0.21819567988496358,
+                        0.47213008276920787,
+                        0.7173429798998987,
+                        0.9643533199726302,
+                        1.18882007856649,
                         1.3453070240944185,]) * u.deg
 
 .. code:: ipython3
@@ -104,14 +106,14 @@ astropy table for convenience
         rms.append(rm)
         e_rms.append(e_rm)
         flags.append(flag)
-    
+
     mao_rm_tab = Table()
     mao_rm_tab.add_column(coords, name='coordinates')
     mao_rm_tab.add_column(rms, name='RM')
     mao_rm_tab.add_column(e_rms, name='e_RM')
     mao_rm_tab.add_column(incs, name='included')
     mao_rm_tab.add_column(flags, name='flag')
-    
+
     mao_rm_tab
 
 
@@ -240,7 +242,7 @@ broken power law. Here we’re using ``nestle`` to do the sampling. All
     ln_noise_evidence:    nan
     ln_evidence: -114.499 +/-  0.130
     ln_bayes_factor:    nan +/-  0.130
-    
+
     2022-11-07 14:04:01.465 INFO structurefunction - fit_data: Fitting results:
     2022-11-07 14:04:01.467 INFO structurefunction - fit_data: amplitude: 180 ± 10
     2022-11-07 14:04:01.468 INFO structurefunction - fit_data: x_break: 22 ± 4
@@ -312,7 +314,7 @@ broken power law. Here we’re using ``nestle`` to do the sampling. All
     ln_noise_evidence:    nan
     ln_evidence: -113.771 +/-  0.124
     ln_bayes_factor:    nan +/-  0.124
-    
+
     2022-11-07 14:04:47.401 INFO structurefunction - fit_data: Fitting results:
     2022-11-07 14:04:47.402 INFO structurefunction - fit_data: amplitude: 180 ± 20
     2022-11-07 14:04:47.403 INFO structurefunction - fit_data: x_break: 15 ± 9
@@ -437,7 +439,7 @@ the triple-point structure function is implemented.
     ln_noise_evidence:    nan
     ln_evidence: -107.875 +/-  0.118
     ln_bayes_factor:    nan +/-  0.118
-    
+
     2022-11-07 14:15:22.691 INFO structurefunction - fit_data: Fitting results:
     2022-11-07 14:15:22.692 INFO structurefunction - fit_data: amplitude: 590 ± 70
     2022-11-07 14:15:22.693 INFO structurefunction - fit_data: x_break: 16 ± 9
