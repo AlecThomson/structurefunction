@@ -836,7 +836,7 @@ def structure_function(
     # Get the angular separation of the source pairs
 
     # Check if coords have distance
-    has_distance = ~issubclass(
+    has_distance = not issubclass(
         coords.data.__class__,
         UnitSphericalRepresentation,
     )
