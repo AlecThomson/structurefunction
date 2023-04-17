@@ -70,6 +70,18 @@ logger.basicConfig(
 quantity_support()
 warnings.filterwarnings("ignore")
 
+def nanvar(data: Union[np.ndarray, u.Quantity]) -> Union[np.ndarray, u.Quantity]:
+    """Compute the variance of an array, ignoring NaNs
+
+    Args:
+        data (Union[np.ndarray, u.Quantity]): Array
+
+    Returns:
+        Union[np.ndarray, u.Quantity]: Variance
+    """
+
+    mask = ~np.isfinite(data)
+    return np.var(data[~mask])
 
 def broken_power_law(
     x: np.ndarray,
@@ -892,7 +904,7 @@ def structure_function(
             bins=bins,
             bin_unit=bin_unit,
         )
-        saturate = np.nanvar(data) * 2
+        saturate = nanvar(data) * 2
     elif n_point == 3:
         source_ids = np.arange(len(coords))
         src_1, src_2 = combinate(source_ids)
@@ -907,7 +919,7 @@ def structure_function(
             bins=bins,
             bin_unit=bin_unit,
         )
-        saturate = np.nanvar(data) * 6
+        saturate = nanvar(data) * 6
     else:
         raise NotImplementedError("Only 2 and 3 point SF are implemented.")
 
