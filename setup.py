@@ -30,7 +30,7 @@ REQUIRED = [
     "ultranest",
     "sigfig",
     "nestle",
-    "xarray",
+    "xarray!=2023.04.*", # Critical bug in xarray 2023.04
     "numba",
 ]
 
