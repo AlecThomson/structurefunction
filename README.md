@@ -20,7 +20,7 @@ That is, the ensemble average of the squared-difference in RM for sources with a
 SF_{\text{RM}}(\delta\theta) = SF_{\text{RM},\text{obs}}(\delta\theta) - SF_{\sigma_\text{RM}}(\delta\theta)
 ```
 
-Computing the error on the structure function is diffifcult. Here I use Monte-Carlo error propagation to compute the errors numerically.
+Computing the error on the structure function is difficult. Here I use Monte-Carlo error propagation to compute the errors numerically.
 
 I provide the ability to fit a broken power-law to the data using both standard least-squares, and full-blown MCMC fitting powered by [bilby](https://lscsoft.docs.ligo.org/bilby/).
 
