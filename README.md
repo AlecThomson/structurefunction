@@ -42,3 +42,10 @@ pip install structurefunction
 ## Usage
 
 See the notebook included in the examples. There I repoduce the results of [Mao et al. 2010](https://ui.adsabs.harvard.edu/abs/2010ApJ...714.1170M).
+
+## Acknowledgment
+If you use this software in your research, please cite the associated CSIRO software collection:
+> Thomson, Alec (2024): StructureFunction. v1. CSIRO. Software Collection. https://doi.org/10.25919/dkwn-mg50
+
+## License
+MIT.
