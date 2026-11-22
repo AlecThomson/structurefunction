@@ -36,6 +36,7 @@ def test_result_round_trips_through_ecsv(tmp_path: Path) -> None:
     assert res.cov is not None
     np.testing.assert_allclose(back.cov, res.cov)
     np.testing.assert_array_equal(back.reliable, res.reliable)
+    assert back.patch_size == res.patch_size
 
 
 def test_cli_writes_table(tmp_path: Path) -> None:

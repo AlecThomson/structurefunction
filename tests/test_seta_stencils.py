@@ -12,42 +12,20 @@ from typing import Literal
 import astropy.units as u
 import numpy as np
 import pytest
-from astropy.coordinates import SkyCoord
-from scipy.interpolate import RegularGridInterpolator
 
 from structurefunction import StencilOptions, structure_function
-
-
-def field(beta: float, n_grid: int, seed: int) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    k = np.fft.fftfreq(n_grid)
-    kk = np.hypot(*np.meshgrid(k, k, indexing="ij"))
-    kk[0, 0] = np.inf
-    # 2D density |F|^2 ~ k^-(beta + 1) gives shell-averaged power ~ k^-beta.
-    amp = kk ** (-(beta + 1) / 2)
-    noise = rng.normal(size=(n_grid, n_grid)) + 1j * rng.normal(size=(n_grid, n_grid))
-    f = np.fft.ifft2(amp * noise).real
-    return f / f.std()
+from structurefunction.simulate import gaussian_random_field, sample_field
 
 
 def slope(beta: float, n_point: Literal[2, 3]) -> float:
-    n_grid = 1024
-    size_deg = 10.0
-    f = field(beta, n_grid, seed=1)
-    axis = np.linspace(0, size_deg, n_grid)
-    interp = RegularGridInterpolator((axis, axis), f)
-    rng = np.random.default_rng(2)
-    n = 30000
-    x = rng.uniform(0, size_deg, n)
-    y = rng.uniform(-size_deg / 2, size_deg / 2, n)
-    vals = np.asarray(interp(np.column_stack((x, y + size_deg / 2))), dtype=np.float64)
-    c = SkyCoord(x * u.deg, y * u.deg)
+    field = gaussian_random_field(beta, 1024, rng=1)
+    coords, values = sample_field(field, 10 * u.deg, 30000, rng=2)
     # Well above the grid scale, well below the box.
     edges = np.geomspace(0.1, 0.5, 5) * u.deg
     res = structure_function(
-        vals,
+        values,
         None,
-        c,
+        coords,
         n_point=n_point,
         bins=edges,
         patches=1,

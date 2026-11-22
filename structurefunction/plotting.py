@@ -55,6 +55,14 @@ def plot_sf(
         alpha=0.5,
         label=f"< {result.min_count} {'pairs' if result.n_point == 2 else 'triplets'}",
     )
+    if result.patch_size is not None and np.any(~result.resampling_reliable):
+        ax.axvspan(
+            result.patch_size.to_value(result.separation.unit),
+            np.nanmax(r) * 1.5,
+            color="0.9",
+            zorder=0,
+            label="beyond patch size: errors underestimated",
+        )
     sat = float(u.Quantity(result.saturation).value if unit else result.saturation)
     ax.axhline(sat, ls="--", color="0.5", label=f"{result.n_point}-point plateau")
     if fit is not None:

@@ -240,7 +240,9 @@ def structure_function(
         )
 
     est = estimate(summed, method, cpw, n_boot, gen)
-    _check_resampling(method, patch_info.n_patch, n_bins, edges, patch_info.size, pos)
+    patch_size = float(chord_to_separation(np.array([patch_info.size]), pos.angular)[0])
+    _check_resampling(method, patch_info.n_patch, n_bins, edges, patch_size)
+    reported_patch_size = _units.to_reported_separation(np.array([patch_size]), pos)[0]
 
     wsum = vals.weights.sum()
     mu = np.sum(vals.weights * vals.values) / wsum
@@ -269,6 +271,7 @@ def structure_function(
             n_patch=patch_info.n_patch,
             error_method=common_method,
             min_count=min_count,
+            patch_size=reported_patch_size,
         )
     unit2 = unit**2
     return SFResult[u.Quantity](
@@ -285,6 +288,7 @@ def structure_function(
         n_patch=patch_info.n_patch,
         error_method=common_method,
         min_count=min_count,
+        patch_size=reported_patch_size,
     )
 
 
@@ -451,7 +455,6 @@ def _check_resampling(
     n_bins: int,
     edges: FloatArray,
     patch_size: float,
-    pos: _units.Positions,
 ) -> None:
     if method == ErrorMethod.NONE:
         return
@@ -462,11 +465,8 @@ def _check_resampling(
             StructureFunctionWarning,
             stacklevel=3,
         )
-    size = float(chord_to_separation(np.array([patch_size]), pos.angular)[0])
-    if edges[-1] > size:
-        warnings.warn(
-            "largest separations exceed the typical patch size; patch resampling "
-            "underestimates errors there",
-            StructureFunctionWarning,
-            stacklevel=3,
+    if edges[-1] > patch_size:
+        logger.info(
+            "Bins beyond the typical patch size have underestimated errors; "
+            "see SFResult.resampling_reliable"
         )

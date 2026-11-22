@@ -12,7 +12,9 @@ Faraday rotation measures of background sources.
 - Covariance between bins from a jackknife or bootstrap over sky patches.
 - Optional positional errors (circular, or separate RA/Dec).
 - Tree-based numba kernels that scale to millions of sources.
-- Power-law and broken-power-law fits with the full covariance.
+- Power-law and broken-power-law fits with the full covariance, and model
+  comparison by BIC and Bayesian evidence.
+- Sky maps: tapered structure functions and fitted parameters per HEALPix cell.
 - Works with plain arrays or astropy `Quantity`, any `SkyCoord` frame, and
   astropy tables.
 

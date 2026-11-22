@@ -44,18 +44,33 @@ def test_cell_matches_direct_weighted_call() -> None:
     c, f, s = sky(20000, 1)
     edges = np.geomspace(0.5, 8, 5) * u.deg
     res = structure_function_skymap(
-        f, s, c, nside=2, radius=15 * u.deg, bins=edges, patches=8,
-        fit_model=None, pixels=[5], bin_tolerance=0.0, rng=0,
-    )  # fmt: skip
+        f,
+        s,
+        c,
+        nside=2,
+        radius=15 * u.deg,
+        bins=edges,
+        patches=8,
+        fit_model=None,
+        pixels=[5],
+        bin_tolerance=0.0,
+        rng=0,
+    )
     lon, lat = HEALPix(nside=2).healpix_to_lonlat([5])
     centre = SkyCoord(lon, lat)
     d = c.separation(centre).to_value(u.deg)
     w = taper_weights(d, 15.0)
     keep = w > 0
     direct = structure_function(
-        f[keep], s[keep], c[keep], bins=edges, weights=w[keep], patches=8,
-        bin_tolerance=0.0, rng=0,
-    )  # fmt: skip
+        f[keep],
+        s[keep],
+        c[keep],
+        bins=edges,
+        weights=w[keep],
+        patches=8,
+        bin_tolerance=0.0,
+        rng=0,
+    )
     np.testing.assert_allclose(res.sf[0], direct.sf, rtol=1e-10)
     np.testing.assert_allclose(res.count[0], direct.count)
 
@@ -63,9 +78,17 @@ def test_cell_matches_direct_weighted_call() -> None:
 def test_white_noise_map_is_flat(tmp_path: Path) -> None:
     c, f, s = sky(30000, 2)
     res = structure_function_skymap(
-        f, s, c, nside=1, radius=40 * u.deg, bins=4, min_sep=2 * u.deg,
-        patches=16, fit_model="power_law", rng=1,
-    )  # fmt: skip
+        f,
+        s,
+        c,
+        nside=1,
+        radius=40 * u.deg,
+        bins=4,
+        min_sep=2 * u.deg,
+        patches=16,
+        fit_model="power_law",
+        rng=1,
+    )
     assert res.pixels.size == 12
     # Debiased SF of white noise with variance 4: 2 * 4 = 8 everywhere.
     pull = (res.sf - 8.0) / res.sf_err
@@ -82,9 +105,16 @@ def test_white_noise_map_is_flat(tmp_path: Path) -> None:
 def test_sparse_cells_are_skipped() -> None:
     c, f, s = sky(500, 3)
     res = structure_function_skymap(
-        f, s, c, nside=4, radius=5 * u.deg, bins=3, min_sep=0.5 * u.deg,
-        min_sources=30, fit_model=None,
-    )  # fmt: skip
+        f,
+        s,
+        c,
+        nside=4,
+        radius=5 * u.deg,
+        bins=3,
+        min_sep=0.5 * u.deg,
+        min_sources=30,
+        fit_model=None,
+    )
     m = res.map("sf", 0)
     assert np.isnan(m).sum() == m.size - res.pixels.size
     with pytest.raises(ValueError, match="bin_index"):
@@ -109,12 +139,31 @@ def test_cli_and_plot(tmp_path: Path) -> None:
     png = tmp_path / "map.png"
     args = get_parser().parse_args(
         [
-            "skymap", str(src), str(out), "--value", "rm", "--error", "rm_err",
-            "--nside", "1", "--radius-deg", "40", "--bins", "4",
-            "--min-sep-deg", "2", "--fit-model", "power_law", "--plot", str(png),
-            "--plot-quantity", "slope", "--seed", "0",
+            "skymap",
+            str(src),
+            str(out),
+            "--value",
+            "rm",
+            "--error",
+            "rm_err",
+            "--nside",
+            "1",
+            "--radius-deg",
+            "40",
+            "--bins",
+            "4",
+            "--min-sep-deg",
+            "2",
+            "--fit-model",
+            "power_law",
+            "--plot",
+            str(png),
+            "--plot-quantity",
+            "slope",
+            "--seed",
+            "0",
         ]
-    )  # fmt: skip
+    )
     cli(args)
     assert SkyMapResult.read(out).pixels.size == 12
     assert png.stat().st_size > 0
@@ -138,9 +187,16 @@ def test_auto_nside_matches_explicit() -> None:
         f, s, c, radius=radius, bins=3, min_sep=2 * u.deg, fit_model=None, rng=0
     )
     explicit = structure_function_skymap(
-        f, s, c, radius=radius, nside=recommend_nside(radius), bins=3,
-        min_sep=2 * u.deg, fit_model=None, rng=0,
-    )  # fmt: skip
+        f,
+        s,
+        c,
+        radius=radius,
+        nside=recommend_nside(radius),
+        bins=3,
+        min_sep=2 * u.deg,
+        fit_model=None,
+        rng=0,
+    )
     assert auto.nside == explicit.nside == recommend_nside(radius)
     np.testing.assert_allclose(auto.map("sf", 1), explicit.map("sf", 1))
 

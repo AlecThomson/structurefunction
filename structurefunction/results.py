@@ -49,6 +49,19 @@ class SFResult[V: (FloatArray, u.Quantity)]:
     """How ``cov`` was estimated."""
     min_count: int
     """Bins with fewer contributions are flagged as unreliable."""
+    patch_size: u.Quantity | None = None
+    """Typical diameter of the resampling patches."""
+
+    @property
+    def resampling_reliable(self) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
+        """Bins smaller than the typical patch size.
+
+        Patch resampling misses variance on scales larger than a patch, so the
+        errors of the other bins are underestimated.
+        """
+        if self.patch_size is None:
+            return np.ones(self.count.size, dtype=bool)
+        return np.asarray(self.separation < self.patch_size, dtype=bool)
 
     @property
     def reliable(self) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
@@ -86,6 +99,12 @@ class SFResult[V: (FloatArray, u.Quantity)]:
                 else float(np.asarray(self.saturation))
             ),
             unit=str(u.Quantity(self.sf).unit) if self.has_units else None,
+            patch_size=None
+            if self.patch_size is None
+            else float(self.patch_size.value),
+            patch_size_unit=None
+            if self.patch_size is None
+            else str(self.patch_size.unit),
         )
         return t
 
@@ -117,6 +136,11 @@ class SFResult[V: (FloatArray, u.Quantity)]:
         n_patch = int(meta["n_patch"])
         method = ErrorMethod(meta["error_method"])
         min_count = int(meta["min_count"])
+        patch_size = (
+            u.Quantity(meta["patch_size"], u.Unit(meta["patch_size_unit"]))
+            if meta.get("patch_size") is not None
+            else None
+        )
         if unit is None:
             return SFResult[FloatArray](
                 sf=sf,
@@ -132,6 +156,7 @@ class SFResult[V: (FloatArray, u.Quantity)]:
                 n_patch=n_patch,
                 error_method=method,
                 min_count=min_count,
+                patch_size=patch_size,
             )
         return SFResult[u.Quantity](
             sf=u.Quantity(sf, unit),
@@ -147,6 +172,7 @@ class SFResult[V: (FloatArray, u.Quantity)]:
             n_patch=n_patch,
             error_method=method,
             min_count=min_count,
+            patch_size=patch_size,
         )
 
     @classmethod

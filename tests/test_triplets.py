@@ -119,3 +119,24 @@ def test_three_point_needs_sky_positions() -> None:
     c = SkyCoord([0, 1, 2] * u.deg, [0, 0, 0] * u.deg, [1, 2, 3] * u.pc)
     with pytest.raises(NotImplementedError):
         structure_function([1.0, 2.0, 3.0], None, c, n_point=3)
+
+
+def test_binned_finds_most_exact_triplets() -> None:
+    cat = make_catalogue(3000, seed=12)
+    edges = np.geomspace(0.2, 2.0, 4) * u.deg
+    exact, binned = (
+        structure_function(
+            cat.values,
+            None,
+            cat.coords,
+            n_point=3,
+            bins=edges,
+            patches=1,
+            error_method="none",
+            stencil=StencilOptions(mode=mode),
+        )
+        for mode in ("exact", "binned")
+    )
+    # Binned cells stay within the tolerances, so they find a subset.
+    assert binned.count.sum() <= exact.count.sum()
+    assert binned.count.sum() >= 0.4 * exact.count.sum()
