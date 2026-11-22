@@ -16,6 +16,7 @@ import numpy as np
 from astropy.table import QTable
 from capn_crunch import BaseOptions
 from scipy.optimize import least_squares, minimize
+from tqdm.auto import tqdm
 
 from structurefunction.logging import logger
 from structurefunction.types import (
@@ -201,6 +202,7 @@ def fit_sf(
     n_burn: int = 1000,
     n_live: int = 500,
     rng: np.random.Generator | int | None = None,
+    progress: bool = False,
 ) -> FitResult:
     """Fit a (broken) power law to a structure function.
 
@@ -218,6 +220,7 @@ def fit_sf(
         n_burn: emcee steps discarded as burn-in.
         n_live: nautilus live points. With at most four parameters, 500 gives
             ``ln Z`` within about 0.01 of nautilus' much slower default.
+        progress: Show the sampler's progress (emcee bar, nautilus log).
         rng: Random generator or seed.
 
     Returns:
@@ -326,7 +329,7 @@ def fit_sf(
         ens = emcee.EnsembleSampler(n_walkers, n_par, log_post)
         seed = int(gen.integers(2**31 - 1))
         ens.random_state = np.random.RandomState(seed).get_state()
-        ens.run_mcmc(p0, n_steps, progress=False)
+        ens.run_mcmc(p0, n_steps, progress=progress)
         samples = ens.get_chain(discard=n_burn, flat=True)
     elif len(names) == 1:
         # One parameter: integrate the posterior directly over the prior range
@@ -356,7 +359,7 @@ def fit_sf(
             n_networks=1,
             seed=int(gen.integers(2**31 - 1)),
         )
-        naut.run(verbose=False)
+        naut.run(verbose=progress)
         pts, _, _ = naut.posterior(equal_weight=True)
         samples = np.asarray(pts)
         log_z = float(naut.log_z)
@@ -424,6 +427,7 @@ def compare_models(
     sampler: SamplerLike = Sampler.MAP,
     likelihood: LikelihoodLike = Likelihood.SELLENTIN_HEAVENS,
     rng: np.random.Generator | int | None = None,
+    progress: bool = True,
 ) -> tuple[QTable, dict[FitModel, FitResult]]:
     """Fit several models to the same bins and compare them.
 
@@ -433,6 +437,7 @@ def compare_models(
         sampler: ``map`` for AIC/BIC only; ``nautilus`` adds the evidence.
         likelihood: How the estimated covariance enters the likelihood.
         rng: Random generator or seed.
+        progress: Show a progress bar over the models.
 
     Returns:
         A table sorted by BIC (lowest first) with chi-squared, AIC, BIC and
@@ -444,7 +449,9 @@ def compare_models(
         FitModel(m): fit_sf(
             result, model=m, sampler=sampler, likelihood=likelihood, rng=gen
         )
-        for m in models
+        for m in tqdm(
+            models, desc="Models", unit="model", disable=not progress, leave=False
+        )
     }
     table = QTable()
     table["model"] = [str(m) for m in fits]

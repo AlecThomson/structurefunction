@@ -37,6 +37,7 @@ dependencies = [
   "numpy>=1.26",
   "pydantic>=2.10",
   "scipy>=1.12",
+  "tqdm>=4.66",
 ]
 optional-dependencies.evidence = [ "nautilus-sampler>=1.0.4" ]
 urls."Bug Tracker" = "https://github.com/AlecThomson/structurefunction/issues"
@@ -168,6 +169,7 @@ module = [
   "nbconvert.*",
   "nbformat.*",
   "numba.*",
+  "tqdm.*",
   "treecorr.*",
 ]
 ignore_missing_imports = true

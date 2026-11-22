@@ -18,6 +18,7 @@ import astropy.units as u
 import numpy as np
 from astropy_healpix import HEALPix
 from scipy.spatial import KDTree
+from tqdm.auto import tqdm
 
 from structurefunction import units
 from structurefunction.core import structure_function
@@ -76,15 +77,16 @@ def pixel_size(nside: int) -> u.Quantity:
 
 
 def recommend_nside(
-    radius: u.Quantity, taper: TaperLike = Taper.COSINE, oversample: float = 2.0
+    radius: u.Quantity, taper: TaperLike = Taper.COSINE, oversample: float = 3.0
 ) -> int:
     """Smallest HEALPix nside that samples the taper finely enough.
 
     The taper's full width at half maximum is ``radius`` for both shapes (the
     cosine taper falls to one half at ``radius / 2``; for the Gaussian
-    ``radius`` is the FWHM). Pixels no larger than ``FWHM / oversample`` make
-    neighbouring cells overlap, so the map is fully sampled (Nyquist for the
-    default ``oversample=2``). Finer grids only add correlated cells.
+    ``radius`` is the FWHM). Pixels are at most ``FWHM / oversample``; the
+    default of three pixels per FWHM is the usual choice for smoothed sky
+    maps (two is the bare Nyquist limit and looks blocky). Finer grids only add
+    strongly correlated cells.
 
     Args:
         radius: Taper scale, as passed to :func:`structure_function_skymap`.
@@ -210,6 +212,7 @@ def structure_function_skymap(
     pos_errors: PositionErrors | None = None,
     stencil: StencilOptions | None = None,
     rng: np.random.Generator | int | None = None,
+    progress: bool = True,
 ) -> SkyMapResult:
     """Apodised structure functions (and fits) for every HEALPix cell.
 
@@ -238,6 +241,7 @@ def structure_function_skymap(
         pos_errors: Optional positional errors.
         stencil: Three-point stencil options.
         rng: Random generator or seed.
+        progress: Show a progress bar over cells.
 
     Returns:
         Per-cell structure functions and parameters.
@@ -301,7 +305,15 @@ def structure_function_skymap(
     }
     sf_unit: u.UnitBase | None = None
     n_eff_occupied: list[float] = []
-    for k, (pix, idx_list) in enumerate(zip(targets, members, strict=True)):
+    cells = tqdm(
+        enumerate(zip(targets, members, strict=True)),
+        total=targets.size,
+        desc="Cells",
+        unit="cell",
+        disable=not progress,
+        leave=False,
+    )
+    for k, (pix, idx_list) in cells:
         idx = np.asarray(idx_list, dtype=np.intp)
         if idx.size < 3:
             continue
@@ -330,6 +342,7 @@ def structure_function_skymap(
                 pos_errors=_subset_pos_errors(pos_errors, idx),
                 stencil=stencil,
                 rng=gen,
+                progress=False,
             )
         sf_unit = res.sf_unit
         rows.append(int(pix))

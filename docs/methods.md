@@ -80,6 +80,13 @@ larger than a region, so errors of bins beyond the typical region size
 (`SFResult.region_size`, `SFResult.resampling_reliable`) are underestimated. The
 bootstrap option resamples regions instead.
 
+With `jk_regions="auto"` (the default), up to 64 regions are used, but never
+fewer than three per bin, and no more than allow each region to be at least as
+large as the largest binned separation. On a small field these can conflict:
+then regions are kept at three per bin, a message says above which separation
+errors are underestimated, and `resampling_reliable` flags those bins. Fewer
+bins, or a smaller `max_sep`, avoid the conflict.
+
 ## Fitting and choosing a model
 
 Models are fitted using the full covariance. Because the covariance is itself
@@ -98,6 +105,5 @@ model.
 `structure_function_skymap` weights the sources around each HEALPix cell centre
 by a cosine or Gaussian taper of scale `radius` and computes the structure
 function with those weights. With `nside="auto"`, `recommend_nside` chooses the
-coarsest grid whose pixels are at most half the taper's half-power width
-(`radius` for both tapers), so neighbouring cells overlap and the map is fully
-sampled.
+coarsest grid whose pixels are at most a third of the taper's half-power width
+(`radius` for both tapers), the usual sampling for smoothed sky maps.

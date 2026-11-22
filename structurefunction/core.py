@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 import warnings
 from typing import TYPE_CHECKING, Literal
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Literal
 import astropy.units as u
 import numba
 import numpy as np
+from tqdm.auto import tqdm
 
 from structurefunction import units
 from structurefunction.estimators import estimate
@@ -20,11 +22,17 @@ from structurefunction.geometry import (
 )
 from structurefunction.kernels.common import new_accumulator
 from structurefunction.kernels.containers import Binning, PolarGrid, Sources
-from structurefunction.kernels.tree import Tree, build_tree, frontier, tree_pairs
+from structurefunction.kernels.tree import (
+    Tree,
+    build_tree,
+    frontier,
+    node_pair_tasks,
+    tree_pairs,
+)
 from structurefunction.kernels.triplets import binned_triplets, exact_triplets
 from structurefunction.logging import StructureFunctionWarning, logger
 from structurefunction.options import StencilOptions
-from structurefunction.regions import make_regions
+from structurefunction.regions import make_regions, recommend_jk_regions
 from structurefunction.results import SFResult
 from structurefunction.types import (
     CrossRegionWeight,
@@ -37,6 +45,8 @@ from structurefunction.types import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from astropy.coordinates import SkyCoord
     from astropy.table import Table
     from numpy.typing import ArrayLike
@@ -53,7 +63,7 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    jk_regions: int | ArrayLike = 64,
+    jk_regions: int | ArrayLike | Literal["auto"] = "auto",
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
     cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
@@ -62,6 +72,7 @@ def structure_function(
     stencil: StencilOptions | None = None,
     min_count: int = 10,
     rng: np.random.Generator | int | None = None,
+    progress: bool = True,
 ) -> SFResult:
     """Second-order structure function with a 2- or 3-point stencil.
 
@@ -84,9 +95,11 @@ def structure_function(
             separation.
         weights: Optional non-negative per-source weights. A pair is weighted
             by the product of its members' weights.
-        jk_regions: Number of jackknife regions (found by k-means on positions),
-            or a region label per source. Use several times as many regions as
-            bins, each larger than the separations of interest.
+        jk_regions: Jackknife regions: ``"auto"`` (see
+            :func:`structurefunction.regions.recommend_jk_regions`), a number
+            (found by k-means on positions), or a region label per source.
+            Use several times as many regions as bins, each larger than the
+            separations of interest.
         error_method: ``jackknife`` (default), ``bootstrap`` or ``none``.
         cross_region_weight: Jackknife weight of cross-region contributions.
         n_boot: Number of bootstrap resamples.
@@ -96,6 +109,7 @@ def structure_function(
         stencil: Triplet-selection options for ``n_point=3``.
         min_count: Bins with fewer contributions are flagged unreliable.
         rng: Random generator or seed (regions and bootstrap).
+        progress: Show a progress bar.
 
     Returns:
         The structure function, its covariance and per-bin diagnostics.
@@ -127,7 +141,13 @@ def structure_function(
 
     edges = _edges(bins, min_sep, max_sep, pos)
     n_bins = edges.size - 1
+    if isinstance(jk_regions, str):
+        if jk_regions != "auto":
+            msg = f"jk_regions must be a number, labels or 'auto', got {jk_regions!r}"
+            raise ValueError(msg)
+        jk_regions = recommend_jk_regions(pos.xyz, pos.angular, edges[-1], n_bins)
     region_info = make_regions(pos.xyz, jk_regions, gen)
+    logger.info("Using %d jackknife regions", region_info.n_regions)
     labels = region_info.labels
 
     error_var = vals.errors**2
@@ -161,8 +181,25 @@ def structure_function(
         binning = Binning(
             kernel_edges, pos.angular, bin_tolerance, pos_errors is not None
         )
-        start_nodes = frontier(tree, 8 * numba.get_num_threads())
-        summed = tree_pairs(tree.nodes, sources, binning, start_nodes, acc)
+        task_a, task_b = node_pair_tasks(frontier(tree, 32 * numba.get_num_threads()))
+        # Large tasks first, so the progress bar does not stall at the end.
+        order = np.argsort(
+            -tree.nodes.moments[task_a, 4] * tree.nodes.moments[task_b, 4]
+        )
+        task_a, task_b = task_a[order], task_b[order]
+
+        def run_pairs(first: int, stop: int) -> None:
+            tree_pairs(
+                tree.nodes,
+                sources,
+                binning,
+                task_a[first:stop],
+                task_b[first:stop],
+                acc,
+            )
+
+        _in_chunks(task_a.size, run_pairs, progress, "Pairs")
+        summed = acc.sum(axis=0)
         stencil_sq_sum = 2.0
     else:
         stencil_sq_sum = 6.0
@@ -174,6 +211,7 @@ def structure_function(
             pos_errors is not None,
             region_info.n_regions,
             acc,
+            progress,
         )
 
     est = estimate(summed, method, cpw, n_boot, gen)
@@ -227,11 +265,12 @@ def structure_function_from_table(
     frame: str = "icrs",
     n_point: Literal[2, 3] = 2,
     bins: int | u.Quantity = 10,
-    jk_regions: int = 64,
+    jk_regions: int | Literal["auto"] = "auto",
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
     pos_errors: PositionErrors | None = None,
     stencil: StencilOptions | None = None,
     rng: np.random.Generator | int | None = None,
+    progress: bool = True,
 ) -> SFResult:
     """Convenience wrapper taking column names of an astropy Table.
 
@@ -262,6 +301,7 @@ def structure_function_from_table(
         pos_errors=pos_errors,
         stencil=stencil,
         rng=rng,
+        progress=progress,
     )
 
 
@@ -311,13 +351,21 @@ def _three_point(
     use_position_errors: bool,
     n_regions: int,
     acc: FloatArray,
+    progress: bool,
 ) -> FloatArray:
     angle_tol = math.radians(stencil.angle_tol_deg)
+    n_sources = sources.values.size
     if StencilMode(stencil.mode) == StencilMode.EXACT:
         binning = Binning(edges, True, 0.0, use_position_errors)
-        return exact_triplets(
-            tree.nodes, tree.roots, sources, binning, angle_tol, stencil.sep_tol, acc
-        )
+
+        def run_exact(first: int, stop: int) -> None:
+            exact_triplets(
+                tree.nodes, tree.roots, sources, binning, angle_tol, stencil.sep_tol,
+                first, stop, acc,
+            )  # fmt: skip
+
+        _in_chunks(n_sources, run_exact, progress, "Triplets")
+        return acc.sum(axis=0)
     if use_position_errors:
         msg = (
             "positional errors with 3-point stencils need StencilOptions(mode='exact')"
@@ -331,7 +379,36 @@ def _three_point(
         np.sqrt(ring_edges[:-1] * ring_edges[1:]),
         2 * math.ceil(2.0 * math.pi / angle_tol),
     )
-    return binned_triplets(tree.nodes, tree.roots, sources, edges, grid, n_regions, acc)
+
+    def run_binned(first: int, stop: int) -> None:
+        binned_triplets(
+            tree.nodes, tree.roots, sources, edges, grid, n_regions, first, stop, acc
+        )
+
+    _in_chunks(n_sources, run_binned, progress, "Triplets")
+    return acc.sum(axis=0)
+
+
+def _in_chunks(
+    n_items: int,
+    run: Callable[[int, int], None],
+    progress: bool,
+    label: str,
+    n_chunks: int = 40,
+) -> None:
+    """Call ``run(first, stop)`` over ``n_items`` in chunks, with a progress bar.
+
+    Each chunk is one parallel kernel call, so chunks must hold many more
+    items than there are threads or threads sit idle at the end of each.
+    """
+    bounds = np.unique(np.linspace(0, n_items, n_chunks + 1).astype(int))
+    with tqdm(
+        total=n_items, desc=label, unit="task" if label == "Pairs" else "source",
+        disable=not progress, leave=False,
+    ) as bar:  # fmt: skip
+        for first, stop in itertools.pairwise(bounds):
+            run(int(first), int(stop))
+            bar.update(int(stop - first))
 
 
 def _edges(

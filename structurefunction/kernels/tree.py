@@ -535,30 +535,26 @@ def tree_pairs(
     nodes: Nodes,
     sources: Sources,
     bins: Binning,
-    start_nodes: IntArray,
+    task_a: IntArray,
+    task_b: IntArray,
     acc: FloatArray,
-) -> FloatArray:
-    """Two-point sums over all pairs, using the tree.
+) -> None:
+    """Add all pairs between ``task_a[k]`` and ``task_b[k]``, for every task.
 
-    Each pair of ``start_nodes`` (including each node with itself) is one
-    parallel task. The start nodes hold every source exactly once, so every
-    source pair is counted once.
-
-    Returns:
-        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
+    Tasks run in parallel and add into the per-thread accumulator ``acc``
+    (shape ``(slot, kind, bin, region, stat)``). See :func:`node_pair_tasks`.
     """
-    n_start = start_nodes.size
-    n_tasks = n_start * (n_start + 1) // 2
-    task_a = np.empty(n_tasks, np.intp)
-    task_b = np.empty(n_tasks, np.intp)
-    task = 0
-    for index_a in range(n_start):
-        for index_b in range(index_a, n_start):
-            task_a[task] = start_nodes[index_a]
-            task_b[task] = start_nodes[index_b]
-            task += 1
-    for task in numba.prange(n_tasks):
+    for task in numba.prange(task_a.size):
         _sum_node_pair(
             acc, get_thread_id(), task_a[task], task_b[task], nodes, sources, bins
         )
-    return acc.sum(axis=0)
+
+
+def node_pair_tasks(start_nodes: IntArray) -> tuple[IntArray, IntArray]:
+    """Every pair of start nodes, each node with itself included.
+
+    The start nodes hold every source exactly once (see :func:`frontier`), so
+    together the tasks cover every source pair once.
+    """
+    index_a, index_b = np.triu_indices(start_nodes.size)
+    return start_nodes[index_a], start_nodes[index_b]

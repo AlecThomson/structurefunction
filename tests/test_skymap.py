@@ -178,9 +178,9 @@ def test_recommend_nside_samples_the_taper(radius_deg: float, taper: TaperLike) 
     radius = radius_deg * u.deg
     nside = recommend_nside(radius, taper)
     assert nside & (nside - 1) == 0  # power of two
-    assert pixel_size(nside) <= radius / 2
+    assert pixel_size(nside) <= radius / 3
     if nside > 1:
-        assert pixel_size(nside // 2) > radius / 2
+        assert pixel_size(nside // 2) > radius / 3
 
 
 def test_auto_nside_matches_explicit() -> None:

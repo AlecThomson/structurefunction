@@ -306,21 +306,23 @@ def exact_triplets(
     bins: Binning,
     angle_tol: float,
     sep_tol: float,
+    first: int,
+    stop: int,
     acc: FloatArray,
-) -> FloatArray:
-    """Three-point sums by finding every triplet (sky positions only).
+) -> None:
+    """Add triplets around middle sources ``first`` to ``stop - 1`` (exact search).
 
-    Returns:
-        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
+    Sky positions only.
+
+    Adds into the per-thread accumulator ``acc``.
     """
-    n_sources = sources.values.size
     n_slots = acc.shape[0]
     # Arms may differ from the mean separation by up to sep_tol.
     inner = bins.edges[0] * (1.0 - sep_tol)
     outer = bins.edges[-1] * (1.0 + sep_tol)
     for slot in numba.prange(n_slots):
         found = np.empty(1024, np.intp)
-        for middle in range(slot, n_sources, n_slots):
+        for middle in range(first + slot, stop, n_slots):
             found, n_found = _neighbours_in_annulus(
                 middle, nodes, roots, sources, inner, outer, found
             )
@@ -336,7 +338,6 @@ def exact_triplets(
                 angle_tol,
                 sep_tol,
             )
-    return acc.sum(axis=0)
 
 
 # --------------------------------------------------------------------------
@@ -692,20 +693,19 @@ def binned_triplets(
     edges: FloatArray,
     grid: PolarGrid,
     n_regions: int,
+    first: int,
+    stop: int,
     acc: FloatArray,
-) -> FloatArray:
-    """Three-point sums from a polar grid of cells around every source.
+) -> None:
+    """Add triplets around middle sources ``first`` to ``stop - 1`` (polar grid).
 
-    Returns:
-        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
+    Adds into the per-thread accumulator ``acc``.
     """
-    n_sources = sources.values.size
     n_slots = acc.shape[0]
     n_cell = grid.ring_mid.size * grid.n_sector
     for slot in numba.prange(n_slots):
         cells = _new_cells(n_regions, n_cell)
-        for middle in range(slot, n_sources, n_slots):
+        for middle in range(first + slot, stop, n_slots):
             _fill_cells(middle, cells, nodes, roots, sources, grid)
             _pair_cells(acc, slot, middle, cells, sources, grid, edges)
             _clear_cells(cells)
-    return acc.sum(axis=0)

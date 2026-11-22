@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from structurefunction.skymap import SkyMapResult
 
 
+def _readable_log_ticks(ax: Axes) -> None:
+    """Label log axes at 1, 2 and 5 times powers of ten, as plain numbers.
+
+    Matplotlib's default labels every minor tick when an axis spans less than
+    about a decade, and those labels overlap.
+    """
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+
+    for axis in (ax.xaxis, ax.yaxis):
+        axis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
+        axis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
+        axis.set_minor_formatter(NullFormatter())
+
+
 def plot_sf(
     result: SFResult,
     fit: FitResult | None = None,
@@ -77,6 +91,7 @@ def plot_sf(
         ax.plot(grid, evaluate(fit, grid), color="C0", label=str(fit.model))
     ax.set_xscale("log")
     ax.set_yscale("log")
+    _readable_log_ticks(ax)
     ax.set_xlabel(f"Separation [{result.separation.unit:latex_inline}]")
     label = "SF" if unit is None else f"SF [{unit:latex_inline}]"
     ax.set_ylabel(label)

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
@@ -42,6 +43,9 @@ def _add_common(parser: ArgumentParser) -> None:
         "--plot", type=Path, default=None, help="Save a quick-look plot"
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--quiet", action="store_true", help="Only report warnings and errors"
+    )
 
 
 def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
@@ -56,7 +60,9 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     _add_common(sf)
     sf.add_argument("--bins", type=int, default=10, help="Number of log bins")
     sf.add_argument(
-        "--jk-regions", type=int, default=64, help="Number of jackknife regions"
+        "--jk-regions",
+        default="auto",
+        help="Number of jackknife regions, or 'auto'",
     )
     sf.add_argument(
         "--error-method", choices=[m.value for m in ErrorMethod], default="jackknife"
@@ -67,7 +73,7 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     sky.add_argument(
         "--nside",
         default="auto",
-        help="HEALPix nside, or 'auto' to sample the taper at twice per FWHM",
+        help="HEALPix nside, or 'auto' for three pixels per taper FWHM",
     )
     sky.add_argument("--radius-deg", type=float, required=True, help="Taper scale")
     sky.add_argument("--taper", choices=[t.value for t in Taper], default="cosine")
@@ -119,6 +125,11 @@ def cli(args: Namespace | None = None) -> None:
         if args.command is None:
             parser.print_help()
             return
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    progress = not args.quiet
     table = Table.read(args.table)
     stencil = create_options_from_parser(args, StencilOptions)
     if args.command == "sf":
@@ -131,10 +142,11 @@ def cli(args: Namespace | None = None) -> None:
             frame=args.frame,
             n_point=args.n_point,
             bins=args.bins,
-            jk_regions=args.jk_regions,
+            jk_regions="auto" if args.jk_regions == "auto" else int(args.jk_regions),
             error_method=args.error_method,
             stencil=stencil,
             rng=args.seed,
+            progress=progress,
         )
         write(res, args.output, overwrite=args.overwrite)
         if args.plot is not None:
@@ -163,6 +175,7 @@ def cli(args: Namespace | None = None) -> None:
         fit_model=None if args.fit_model == "none" else args.fit_model,
         stencil=stencil,
         rng=args.seed,
+        progress=progress,
     )
     write(sky, args.output, overwrite=args.overwrite)
     if args.plot is not None:
