@@ -167,3 +167,6 @@ uncle_timmy.pickle
 example/lmc_data_table.csv
 lmc/broken_power_law_2_point_result.json
 lmc/broken_power_law_3_point_result.json
+
+# hatch-vcs
+structurefunction/_version.py
