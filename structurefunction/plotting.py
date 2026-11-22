@@ -63,7 +63,7 @@ def plot_sf(
             np.nanmax(r) * 1.5,
             color="0.9",
             zorder=0,
-            label="beyond region size: errors underestimated",
+            label="errors underestimated (larger than jackknife regions)",
         )
     sat = result.saturation
     ax.axhline(sat, ls="--", color="0.5", label=f"{result.n_point}-point plateau")
