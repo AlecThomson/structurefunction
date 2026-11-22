@@ -11,16 +11,15 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, assert_never
 
 import astropy.units as u
 import numpy as np
-from astropy.table import QTable, Table
 from astropy_healpix import HEALPix
 from scipy.spatial import KDTree
 
-from structurefunction import _units
+from structurefunction import units
 from structurefunction.core import structure_function
 from structurefunction.fitting import fit_sf
 from structurefunction.geometry import separation_range
@@ -36,8 +35,6 @@ from structurefunction.types import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from astropy.coordinates import SkyCoord
     from numpy.typing import ArrayLike
 
@@ -109,12 +106,14 @@ def recommend_nside(
 class SkyMapResult:
     """Per-cell structure functions and fitted parameters on a HEALPix grid.
 
-    Arrays have one row per computed cell (``pixels``); use :meth:`map` to
-    expand to a full-sky HEALPix array with NaN for cells that were skipped.
+    Arrays have one row per computed cell (``pixels``); :func:`healpix_map`
+    expands a quantity to a full-sky HEALPix array, NaN for skipped cells.
     """
 
     nside: int
+    """HEALPix resolution used."""
     order: Literal["ring", "nested"]
+    """HEALPix pixel ordering."""
     pixels: IntArray
     """HEALPix indices of the computed cells."""
     n_eff: FloatArray
@@ -122,8 +121,11 @@ class SkyMapResult:
     sf: FloatArray
     """Structure function per cell and bin, shape ``(n_cell, n_bin)``."""
     sf_err: FloatArray
+    """Structure function errors per cell and bin."""
     count: FloatArray
+    """Pairs or triplets per cell and bin."""
     bin_edges: u.Quantity
+    """Separation bin edges, shared by all cells."""
     separation: FloatArray
     """Mean separation per cell and bin (unit of ``bin_edges``)."""
     sf_unit: u.UnitBase | None
@@ -133,133 +135,58 @@ class SkyMapResult:
     params: FloatArray
     """MAP parameters per cell, shape ``(n_cell, n_param)``."""
     params_lower: FloatArray
+    """16th percentile of each fitted parameter per cell."""
     params_upper: FloatArray
+    """84th percentile of each fitted parameter per cell."""
     chi2: FloatArray
+    """Chi-squared of the fit in each cell (NaN without a fit)."""
     n_point: int
+    """Number of points in the stencil."""
     taper: Taper
+    """Taper shape."""
     radius: u.Quantity
+    """Taper scale."""
 
-    @property
-    def npix(self) -> int:
-        """Number of pixels on the full sky."""
-        return 12 * self.nside**2
 
-    def map(self, name: str, bin_index: int | None = None) -> FloatArray:
-        """Full-sky HEALPix array of a quantity, NaN where not computed.
+def healpix_map(
+    result: SkyMapResult, name: str, bin_index: int | None = None
+) -> FloatArray:
+    """Full-sky HEALPix array of one sky-map quantity, NaN where not computed.
 
-        Args:
-            name: ``sf``, ``sf_err``, ``count``, ``separation``, ``n_eff``,
-                ``chi2``, a parameter name, or a parameter name suffixed with
-                ``_lower`` / ``_upper``.
-            bin_index: Bin for per-bin quantities.
+    Args:
+        result: The sky map.
+        name: ``sf``, ``sf_err``, ``count``, ``separation``, ``n_eff``,
+            ``chi2``, a parameter name, or a parameter name suffixed with
+            ``_lower`` / ``_upper``.
+        bin_index: Bin for per-bin quantities.
 
-        Raises:
-            KeyError: For an unknown quantity.
-            ValueError: If ``bin_index`` is missing for a per-bin quantity.
-        """
-        out = np.full(self.npix, np.nan)
-        per_bin = {
-            "sf": self.sf,
-            "sf_err": self.sf_err,
-            "count": self.count,
-            "separation": self.separation,
-        }
-        if name in per_bin:
-            if bin_index is None:
-                msg = f"{name!r} is per bin: pass bin_index"
-                raise ValueError(msg)
-            out[self.pixels] = per_bin[name][:, bin_index]
-            return out
-        scalar = {"n_eff": self.n_eff, "chi2": self.chi2}
-        for i, p in enumerate(self.param_names):
-            scalar[p] = self.params[:, i]
-            scalar[f"{p}_lower"] = self.params_lower[:, i]
-            scalar[f"{p}_upper"] = self.params_upper[:, i]
-        if name not in scalar:
-            msg = f"unknown quantity {name!r}; choose from {sorted(per_bin | scalar)}"
-            raise KeyError(msg)
-        out[self.pixels] = scalar[name]
+    Raises:
+        KeyError: For an unknown quantity.
+        ValueError: If ``bin_index`` is missing for a per-bin quantity.
+    """
+    out = np.full(12 * result.nside**2, np.nan)
+    per_bin = {
+        "sf": result.sf,
+        "sf_err": result.sf_err,
+        "count": result.count,
+        "separation": result.separation,
+    }
+    if name in per_bin:
+        if bin_index is None:
+            msg = f"{name!r} is per bin: pass bin_index"
+            raise ValueError(msg)
+        out[result.pixels] = per_bin[name][:, bin_index]
         return out
-
-    def to_table(self) -> QTable:
-        """One row per computed cell; per-bin quantities as vector columns."""
-        t = QTable()
-        t["pixel"] = self.pixels
-        t["n_eff"] = self.n_eff
-        t["sf"] = self.sf if self.sf_unit is None else u.Quantity(self.sf, self.sf_unit)
-        t["sf_err"] = (
-            self.sf_err
-            if self.sf_unit is None
-            else u.Quantity(self.sf_err, self.sf_unit)
-        )
-        t["count"] = self.count
-        t["separation"] = u.Quantity(self.separation, self.bin_edges.unit)
-        t["chi2"] = self.chi2
-        for i, p in enumerate(self.param_names):
-            t[p] = self.params[:, i]
-            t[f"{p}_lower"] = self.params_lower[:, i]
-            t[f"{p}_upper"] = self.params_upper[:, i]
-        # Bin edges as (identical) vector columns and short header keys keep
-        # the table valid in both ECSV and FITS.
-        unit = self.bin_edges.unit
-        edges = self.bin_edges.to_value(unit)
-        t["bin_lo"] = u.Quantity(np.broadcast_to(edges[:-1], self.sf.shape), unit)
-        t["bin_hi"] = u.Quantity(np.broadcast_to(edges[1:], self.sf.shape), unit)
-        t.meta.update(
-            NSIDE=self.nside,
-            ORDER=self.order,
-            NPOINT=self.n_point,
-            TAPER=str(self.taper),
-            RADIUS=float(self.radius.to_value(u.deg)),
-            SFUNIT="" if self.sf_unit is None else str(self.sf_unit),
-        )
-        return t
-
-    def write(self, path: str | Path, overwrite: bool = False) -> None:
-        """Write to any astropy table format (ECSV or FITS)."""
-        self.to_table().write(path, overwrite=overwrite)
-
-    @classmethod
-    def read(cls, path: str | Path) -> SkyMapResult:
-        """Read a result written by :meth:`write`."""
-        t = QTable(Table.read(path))
-        m = t.meta
-        names = tuple(
-            c.removesuffix("_lower") for c in t.colnames if c.endswith("_lower")
-        )
-
-        def plain(col: str) -> FloatArray:
-            c = t[col]
-            return np.asarray(getattr(c, "value", c), dtype=np.float64)
-
-        def stack(suffix: str) -> FloatArray:
-            if not names:
-                return np.empty((len(t), 0))
-            return np.column_stack([plain(f"{p}{suffix}") for p in names])
-
-        lo = t["bin_lo"][0]
-        hi = t["bin_hi"][0]
-        edges = u.Quantity(np.append(lo.value, hi.value[-1]), lo.unit)
-        return cls(
-            nside=int(m["NSIDE"]),
-            order=m["ORDER"],
-            pixels=np.asarray(t["pixel"], dtype=np.intp),
-            n_eff=plain("n_eff"),
-            sf=plain("sf"),
-            sf_err=plain("sf_err"),
-            count=plain("count"),
-            bin_edges=edges,
-            separation=plain("separation"),
-            sf_unit=u.Unit(m["SFUNIT"]) if m["SFUNIT"] else None,
-            param_names=names,
-            params=stack(""),
-            params_lower=stack("_lower"),
-            params_upper=stack("_upper"),
-            chi2=plain("chi2"),
-            n_point=int(m["NPOINT"]),
-            taper=Taper(m["TAPER"]),
-            radius=u.Quantity(m["RADIUS"], u.deg),
-        )
+    per_cell = {"n_eff": result.n_eff, "chi2": result.chi2}
+    for index, parameter in enumerate(result.param_names):
+        per_cell[parameter] = result.params[:, index]
+        per_cell[f"{parameter}_lower"] = result.params_lower[:, index]
+        per_cell[f"{parameter}_upper"] = result.params_upper[:, index]
+    if name not in per_cell:
+        msg = f"unknown quantity {name!r}; choose from {sorted(per_bin | per_cell)}"
+        raise KeyError(msg)
+    out[result.pixels] = per_cell[name]
+    return out
 
 
 def structure_function_skymap(
@@ -275,7 +202,7 @@ def structure_function_skymap(
     order: Literal["ring", "nested"] = "ring",
     weights: ArrayLike | None = None,
     n_point: Literal[2, 3] = 2,
-    patches: int = 16,
+    regions: int = 16,
     min_sources: float = 30.0,
     fit_model: FitModelLike | None = FitModel.BROKEN_POWER_LAW,
     pixels: ArrayLike | None = None,
@@ -303,7 +230,7 @@ def structure_function_skymap(
         order: HEALPix pixel ordering.
         weights: Optional per-source weights, multiplied by the taper.
         n_point: Stencil size.
-        patches: k-means patches per cell for the jackknife.
+        regions: k-means regions per cell for the jackknife.
         min_sources: Skip cells with fewer effective sources.
         fit_model: Model to fit per cell (MAP), or ``None``.
         pixels: Only compute these cells (default: all with enough sources).
@@ -320,8 +247,8 @@ def structure_function_skymap(
     """
     taper = Taper(taper)
     gen = np.random.default_rng(rng)
-    vals = _units.split_values(values, errors, weights)
-    pos = _units.positions(coords)
+    vals = units.split_values(values, errors, weights)
+    pos = units.positions(coords)
     if not pos.angular:
         msg = "sky maps need 2D sky positions"
         raise ValueError(msg)
@@ -387,8 +314,8 @@ def structure_function_skymap(
         n_eff_occupied.append(n_eff)
         if n_eff < min_sources:
             continue
-        v = _units.attach_unit(vals.values[idx], vals.unit)
-        e = _units.attach_unit(vals.errors[idx], vals.unit)
+        v = units.attach_unit(vals.values[idx], vals.unit)
+        e = units.attach_unit(vals.errors[idx], vals.unit)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", StructureFunctionWarning)
             res = structure_function(
@@ -398,7 +325,7 @@ def structure_function_skymap(
                 n_point=n_point,
                 bins=edges_q,
                 weights=w,
-                patches=min(patches, max(int(n_eff) // 10, 2)),
+                regions=min(regions, max(int(n_eff) // 10, 2)),
                 bin_tolerance=bin_tolerance,
                 pos_errors=_subset_pos_errors(pos_errors, idx),
                 stencil=stencil,
@@ -480,11 +407,12 @@ def _subset_pos_errors(
         return q if q.ndim == 0 else q[idx]
 
     if isinstance(pos_errors, CircularPositionError):
-        return replace(pos_errors, sigma=sub(pos_errors.sigma))
+        return pos_errors.model_copy(update={"sigma": sub(pos_errors.sigma)})
     if isinstance(pos_errors, AxisPositionErrors):  # pragma: no branch
-        return replace(
-            pos_errors,
-            sigma_ra=sub(pos_errors.sigma_ra),
-            sigma_dec=sub(pos_errors.sigma_dec),
+        return pos_errors.model_copy(
+            update={
+                "sigma_ra": sub(pos_errors.sigma_ra),
+                "sigma_dec": sub(pos_errors.sigma_dec),
+            }
         )
     assert_never(pos_errors)

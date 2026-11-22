@@ -8,16 +8,23 @@
 - No bare `*`, `*args` or `**kwargs` in signatures. No module-level constants
   unless genuinely global (logger, `__all__`, type aliases). No import-time side
   effects.
+- Classes hold data; behaviour lives in module functions (e.g. `io.write`,
+  `skymap.healpix_map`, `fitting.evaluate`). Results are frozen dataclasses with
+  no methods. Options are pydantic models via `capn_crunch.BaseOptions`:
+  validate with `Field` constraints and `AfterValidator`, not `__post_init__`;
+  generate CLI flags with `add_options_to_parser`.
+- Every attribute of every class has a docstring (`tests/test_docstrings.py`).
+- Errors come from "jackknife regions" (`regions.py`); don't call them patches.
 - Modes are `StrEnum`s in `types.py`, each with a `*Like` alias accepting the
   string; convert once at the boundary.
-- astropy (`Quantity`, `Unit`, `SkyCoord`) is handled only in `_units.py`;
+- astropy (`Quantity`, `Unit`, `SkyCoord`) is handled only in `units.py`;
   everything downstream is `NDArray[np.float64]`.
-- Kernel accumulators: `(slot, Kind, bin, patch, Stat)`; see
-  `_kernels/common.py`. New kernels must credit AUTO/CROSS/MARK so the jackknife
+- Kernel accumulators: `(slot, Kind, bin, region, Stat)`; see
+  `kernels/common.py`. New kernels must credit AUTO/CROSS/MARK so the jackknife
   and bootstrap stay single-pass.
 - Every kernel change needs a comparison against `tests/reference.py` (numpy,
   obviously correct) at `bin_tolerance=0`.
-- Kernel arrays travel in the NamedTuples in `_kernels/containers.py`. In hot
+- Kernel arrays travel in the NamedTuples in `kernels/containers.py`. In hot
   loops, index rows directly (`positions[i, 0]`) rather than slicing
   (`positions[i]`): numba builds a new array object for every slice.
 - `inline="always"` is for pure helpers and the accumulation path only. numba
@@ -31,4 +38,4 @@
 
 mypy (strict) is the authoritative gate. ty is pinned exactly in `pyproject.toml`
 (beta: rules change between releases; bump deliberately). If ty false positives
-spread beyond `_units.py`, make its CI step advisory rather than bending code.
+spread beyond `units.py`, make its CI step advisory rather than bending code.

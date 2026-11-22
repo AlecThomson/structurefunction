@@ -1,4 +1,4 @@
-[![Documentation Status](https://readthedocs.org/projects/structurefunction/badge/?version=latest)](https://structurefunction.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://img.shields.io/readthedocs/structurefunction/latest)](https://structurefunction.readthedocs.io/en/latest/)
 [![DOI](https://img.shields.io/badge/doi-10.25919/dkwn--mg50-blue.svg)](https://doi.org/10.25919/dkwn-mg50)
 
 # structurefunction
@@ -9,7 +9,7 @@ Faraday rotation measures of background sources.
 - Two-point and three-point stencils
   ([Seta et al. 2023](https://arxiv.org/abs/2206.13798)).
 - Exact noise-bias subtraction, per pair or triplet.
-- Covariance between bins from a jackknife or bootstrap over sky patches.
+- Covariance between bins from a jackknife or bootstrap over sky regions.
 - Optional positional errors (circular, or separate RA/Dec).
 - Tree-based numba kernels that scale to millions of sources.
 - Power-law and broken-power-law fits with the full covariance, and model

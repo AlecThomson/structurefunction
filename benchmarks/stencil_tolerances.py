@@ -36,9 +36,9 @@ def slope(
         coords,  # type: ignore[arg-type]
         n_point=3,
         bins=edges,
-        patches=1,
+        regions=1,
         error_method="none",
-        stencil=StencilOptions(angle_tol, sep_tol, mode),  # type: ignore[arg-type]
+        stencil=StencilOptions(angle_tol_deg=angle_tol, sep_tol=sep_tol, mode=mode),  # type: ignore[arg-type]
     )
     fit = np.polyfit(np.log(res.separation.value), np.log(res.sf), 1)[0]
     return float(fit), float(res.count.sum())

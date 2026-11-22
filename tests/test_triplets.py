@@ -25,7 +25,7 @@ def test_exact_matches_reference() -> None:
         n_point=3,
         bins=EDGES,
         weights=cat.weights,
-        patches=4,
+        regions=4,
         stencil=opts,
     )
     sf, bias, cnt = sf3_exact(
@@ -61,9 +61,9 @@ def test_binned_is_subset_of_exact_on_grid() -> None:
             c,
             n_point=3,
             bins=edges,
-            patches=1,
+            regions=1,
             error_method="none",
-            stencil=StencilOptions(1.0, 0.01, mode),
+            stencil=StencilOptions(angle_tol_deg=1.0, sep_tol=0.01, mode=mode),
         )
         for mode in ("exact", "binned")
     )
@@ -85,7 +85,7 @@ def test_white_noise_saturates_at_six_variance() -> None:
             c,
             n_point=3,
             bins=np.geomspace(0.5, 4, 5) * u.deg,
-            patches=40,
+            regions=40,
             stencil=StencilOptions(mode=mode),
             rng=1,
         )
@@ -99,14 +99,14 @@ def test_gradient_cancels_in_three_point() -> None:
     c = SkyCoord(lon * u.deg, rng.uniform(-5, 5, n) * u.deg)
     f = 5.0 * lon
     edges = np.geomspace(0.3, 2.0, 5) * u.deg
-    d2 = structure_function(f, None, c, bins=edges, patches=1, error_method="none")
+    d2 = structure_function(f, None, c, bins=edges, regions=1, error_method="none")
     d3 = structure_function(
         f,
         None,
         c,
         n_point=3,
         bins=edges,
-        patches=1,
+        regions=1,
         error_method="none",
         stencil=StencilOptions(angle_tol_deg=5.0, sep_tol=0.05, mode="exact"),
     )
@@ -131,7 +131,7 @@ def test_binned_finds_most_exact_triplets() -> None:
             cat.coords,
             n_point=3,
             bins=edges,
-            patches=1,
+            regions=1,
             error_method="none",
             stencil=StencilOptions(mode=mode),
         )

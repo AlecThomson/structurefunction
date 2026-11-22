@@ -30,9 +30,11 @@ dynamic = [ "version" ]
 dependencies = [
   "astropy>=6",
   "astropy-healpix>=1.1",
+  "capn-crunch>=1.2",
   "emcee>=3.1",
   "numba>=0.61",
   "numpy>=1.26",
+  "pydantic>=2.10",
   "scipy>=1.12",
 ]
 optional-dependencies.evidence = [ "nautilus-sampler>=1.0.4" ]
@@ -152,7 +154,7 @@ strict = true
 
 [[tool.mypy.overrides]]
 # These ship no type information. astropy in particular is untyped (no
-# py.typed); it is confined to structurefunction/_units.py and the public
+# py.typed); it is confined to structurefunction/units.py and the public
 # signatures, where it degrades to Any.
 module = [
   "astropy.*",

@@ -40,9 +40,12 @@ def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult[Floa
         count=np.full(r.size, 1e4),
         weight=np.full(r.size, 1e4),
         n_point=2,
-        n_patch=500,
+        n_regions=500,
         error_method=ErrorMethod.JACKKNIFE,
         min_count=10,
+        reliable=np.ones(r.size, dtype=bool),
+        region_size=None,
+        resampling_reliable=np.ones(r.size, dtype=bool),
     )
 
 

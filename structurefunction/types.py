@@ -17,9 +17,9 @@ class ErrorMethod(StrEnum):
     """How the structure function covariance is estimated."""
 
     JACKKNIFE = "jackknife"
-    """Delete-one jackknife over spatial patches (default)."""
+    """Delete-one jackknife over spatial regions (default)."""
     BOOTSTRAP = "bootstrap"
-    """Marked bootstrap over spatial patches (Loh 2008)."""
+    """Marked bootstrap over spatial regions (Loh 2008)."""
     NONE = "none"
     """No covariance; only the noise-debiased structure function."""
 
@@ -27,16 +27,16 @@ class ErrorMethod(StrEnum):
 type ErrorMethodLike = ErrorMethod | Literal["jackknife", "bootstrap", "none"]
 
 
-class CrossPatchWeight(StrEnum):
-    """Weight given to pairs spanning two patches in jackknife resamples."""
+class CrossRegionWeight(StrEnum):
+    """Weight given to pairs spanning two regions in jackknife resamples."""
 
     SIMPLE = "simple"
-    """Drop any pair or triplet touching the removed patch."""
+    """Drop any pair or triplet touching the removed region."""
     MATCH = "match"
-    """Drop cross-patch pairs with weight 1/2 (Mohammad & Percival 2022)."""
+    """Drop cross-region pairs with weight 1/2 (Mohammad & Percival 2022)."""
 
 
-type CrossPatchWeightLike = CrossPatchWeight | Literal["simple", "match"]
+type CrossRegionWeightLike = CrossRegionWeight | Literal["simple", "match"]
 
 
 class StencilMode(StrEnum):
@@ -57,8 +57,11 @@ class FitModel(StrEnum):
     CONSTANT = "constant"
     """A flat structure function: no structure on the scales fitted."""
     POWER_LAW = "power_law"
+    """``A (r / pivot)^slope``."""
     BROKEN_POWER_LAW = "broken_power_law"
+    """Two power laws meeting sharply at a break."""
     SMOOTH_BROKEN_POWER_LAW = "smooth_broken_power_law"
+    """Two power laws joined smoothly around a break."""
 
 
 type FitModelLike = (

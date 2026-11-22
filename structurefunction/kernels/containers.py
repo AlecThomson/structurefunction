@@ -40,8 +40,8 @@ class Nodes(NamedTuple):
     """Largest distance from the centre to a member."""
     moments: FloatArray
     """Value moments, columns as in :class:`Moment`."""
-    patch: IntArray
-    """Patch of each node (nodes never span patches)."""
+    region: IntArray
+    """Region of each node (nodes never span regions)."""
 
 
 class Sources(NamedTuple):
@@ -50,10 +50,13 @@ class Sources(NamedTuple):
     positions: FloatArray
     """Unit vectors, or 3D positions with distances, shape ``(n, 3)``."""
     values: FloatArray
+    """Measured values."""
     error_var: FloatArray
     """Measurement error variances."""
     weights: FloatArray
-    patch: IntArray
+    """Non-negative source weights."""
+    region: IntArray
+    """Resampling region of each source."""
     east: FloatArray
     """Unit east vector at each source (angular data only)."""
     north: FloatArray
@@ -66,11 +69,13 @@ class Binning(NamedTuple):
     """Separation bins and how pairs are placed in them."""
 
     edges: FloatArray
+    """Bin edges in separation (radians, or the distance unit)."""
     angular: bool
     """Separations are great-circle angles (else 3D distances)."""
     tolerance: float
     """``bin_tolerance``: allowed misplacement as a fraction of a bin width."""
     use_position_errors: bool
+    """Spread pairs over bins using their separation uncertainty."""
 
 
 class PolarGrid(NamedTuple):

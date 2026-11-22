@@ -26,7 +26,7 @@ exclude_patterns = ["_build", "**.ipynb_checkpoints", "Thumbs.db", ".DS_Store"]
 html_theme = "furo"
 
 autoapi_dirs = ["../structurefunction"]
-autoapi_ignore = ["*/_kernels/*", "*/_version.py"]
+autoapi_ignore = ["*/_version.py"]
 autoapi_options = ["members", "undoc-members", "show-inheritance", "imported-members"]
 
 # Notebooks are executed at build time so the docs always match the code.
@@ -39,6 +39,3 @@ intersphinx_mapping = {
 }
 
 always_document_param_types = True
-
-# Private kernels are excluded from the API docs, so their imports are unresolved.
-suppress_warnings = ["autoapi.python_import_resolution"]

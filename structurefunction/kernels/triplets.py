@@ -28,8 +28,8 @@ from typing import NamedTuple
 import numba
 import numpy as np
 
-from structurefunction._kernels.brute import position_var_towards
-from structurefunction._kernels.common import (
+from structurefunction.kernels.brute import position_var_towards
+from structurefunction.kernels.common import (
     Contribution,
     add_triplet,
     chord_to_separation,
@@ -38,7 +38,7 @@ from structurefunction._kernels.common import (
     gaussian_bin_fraction,
     gaussian_bin_range,
 )
-from structurefunction._kernels.containers import (
+from structurefunction.kernels.containers import (
     Binning,
     Moment,
     Nodes,
@@ -52,8 +52,11 @@ class Offset(NamedTuple):
     """A 3D vector from the middle source."""
 
     x: float
+    """First Cartesian component."""
     y: float
+    """Second Cartesian component."""
     z: float
+    """Third Cartesian component."""
 
 
 @numba.njit(cache=True)
@@ -173,16 +176,23 @@ def _add_triplet_to_bins(
     separation: float,
     sigma: float,
     edges: FloatArray,
-    patches: tuple[int, int, int],
+    regions: tuple[int, int, int],
     contribution: Contribution,
 ) -> None:
     """Add a triplet to its bin, spreading it if its separation is uncertain."""
-    patch_middle, patch_a, patch_b = patches
+    region_middle, region_a, region_b = regions
     if sigma <= 0.0:
         bin_index = find_bin(separation, edges)
         if bin_index >= 0:
             add_triplet(
-                acc, slot, bin_index, patch_middle, patch_a, patch_b, contribution, 1.0
+                acc,
+                slot,
+                bin_index,
+                region_middle,
+                region_a,
+                region_b,
+                contribution,
+                1.0,
             )
         return
     first, last = gaussian_bin_range(separation, sigma, edges)
@@ -195,9 +205,9 @@ def _add_triplet_to_bins(
                 acc,
                 slot,
                 bin_index,
-                patch_middle,
-                patch_a,
-                patch_b,
+                region_middle,
+                region_a,
+                region_b,
                 contribution,
                 fraction,
             )
@@ -237,9 +247,9 @@ def _add_source_triplet(
         weight * separation,
         1.0,
     )
-    patches = (sources.patch[middle], sources.patch[a], sources.patch[b])
+    regions = (sources.region[middle], sources.region[a], sources.region[b])
     _add_triplet_to_bins(
-        acc, slot, separation, sigma, bins.edges, patches, contribution
+        acc, slot, separation, sigma, bins.edges, regions, contribution
     )
 
 
@@ -301,7 +311,7 @@ def exact_triplets(
     """Three-point sums by finding every triplet (sky positions only).
 
     Returns:
-        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
+        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
     """
     n_sources = sources.values.size
     n_slots = acc.shape[0]
@@ -337,69 +347,75 @@ class CellStat(IntEnum):
     """Per-cell sums, relative to the middle source's value ``f0``."""
 
     WEIGHT = 0
+    """``sum w``"""
     OFFSET = 1
     """``sum w (f - f0)``"""
     OFFSET_SQ = 2
     """``sum w (f - f0)^2``"""
     ERROR_VAR = 3
+    """``sum w sigma^2``"""
     SEPARATION = 4
     """``sum w * distance from the middle source``"""
     COUNT = 5
+    """Number of sources."""
 
 
 class Cells(NamedTuple):
-    """Cell sums around one middle source, per patch, plus bookkeeping.
+    """Cell sums around one middle source, per region, plus bookkeeping.
 
     Only touched cells are visited when pairing and cleared afterwards, so the
     cost per middle source does not depend on the size of the grid.
     """
 
     sums: FloatArray
-    """``(n_patch, n_cell, len(CellStat))``"""
+    """``(n_regions, n_cell, len(CellStat))``"""
     touched: BoolArray
-    """``(n_patch, n_cell)``"""
-    touched_patch: IntArray
+    """``(n_regions, n_cell)``"""
+    touched_region: IntArray
+    """Region of each touched cell, in the order touched."""
     touched_cell: IntArray
-    patch_seen: BoolArray
-    patches: IntArray
-    """Patches touched so far, in order."""
+    """Index of each touched cell, in the order touched."""
+    region_seen: BoolArray
+    """Whether each region has a touched cell, ``(n_regions,)``."""
+    regions: IntArray
+    """Regions touched so far, in order."""
     counts: IntArray
-    """Number of touched cells, number of touched patches."""
+    """Number of touched cells, number of touched regions."""
 
 
 @numba.njit(cache=True)
-def _new_cells(n_patch: int, n_cell: int) -> Cells:
-    capacity = n_patch * n_cell
+def _new_cells(n_regions: int, n_cell: int) -> Cells:
+    capacity = n_regions * n_cell
     return Cells(
-        np.zeros((n_patch, n_cell, CellStat.COUNT + 1)),  # COUNT is the last column
-        np.zeros((n_patch, n_cell), np.bool_),
+        np.zeros((n_regions, n_cell, CellStat.COUNT + 1)),  # COUNT is the last column
+        np.zeros((n_regions, n_cell), np.bool_),
         np.empty(capacity, np.intp),
         np.empty(capacity, np.intp),
-        np.zeros(n_patch, np.bool_),
-        np.empty(n_patch, np.intp),
+        np.zeros(n_regions, np.bool_),
+        np.empty(n_regions, np.intp),
         np.zeros(2, np.intp),
     )
 
 
 @numba.njit(cache=True, inline="always")
-def _touch(cells: Cells, patch: int, cell: int) -> None:
-    """Record a cell (and its patch) the first time it receives a source."""
-    if not cells.touched[patch, cell]:
-        cells.touched[patch, cell] = True
+def _touch(cells: Cells, region: int, cell: int) -> None:
+    """Record a cell (and its region) the first time it receives a source."""
+    if not cells.touched[region, cell]:
+        cells.touched[region, cell] = True
         n_touched = cells.counts[0]
-        cells.touched_patch[n_touched] = patch
+        cells.touched_region[n_touched] = region
         cells.touched_cell[n_touched] = cell
         cells.counts[0] = n_touched + 1
-        if not cells.patch_seen[patch]:
-            cells.patch_seen[patch] = True
-            cells.patches[cells.counts[1]] = patch
+        if not cells.region_seen[region]:
+            cells.region_seen[region] = True
+            cells.regions[cells.counts[1]] = region
             cells.counts[1] += 1
 
 
 @numba.njit(cache=True, inline="always")
 def _add_to_cell(
     cells: Cells,
-    patch: int,
+    region: int,
     cell: int,
     weight: float,
     offset_sum: float,
@@ -408,14 +424,14 @@ def _add_to_cell(
     weighted_separation: float,
     count: float,
 ) -> None:
-    _touch(cells, patch, cell)
+    _touch(cells, region, cell)
     sums = cells.sums
-    sums[patch, cell, CellStat.WEIGHT] += weight
-    sums[patch, cell, CellStat.OFFSET] += offset_sum
-    sums[patch, cell, CellStat.OFFSET_SQ] += offset_sq_sum
-    sums[patch, cell, CellStat.ERROR_VAR] += error_var
-    sums[patch, cell, CellStat.SEPARATION] += weighted_separation
-    sums[patch, cell, CellStat.COUNT] += count
+    sums[region, cell, CellStat.WEIGHT] += weight
+    sums[region, cell, CellStat.OFFSET] += offset_sum
+    sums[region, cell, CellStat.OFFSET_SQ] += offset_sq_sum
+    sums[region, cell, CellStat.ERROR_VAR] += error_var
+    sums[region, cell, CellStat.SEPARATION] += weighted_separation
+    sums[region, cell, CellStat.COUNT] += count
 
 
 @numba.njit(cache=True, inline="always")
@@ -466,7 +482,7 @@ def _add_node_to_cell(
     mean_offset = moments[node, Moment.MEAN] - middle_value
     _add_to_cell(
         cells,
-        nodes.patch[node],
+        nodes.region[node],
         cell,
         weight,
         weight * mean_offset,
@@ -492,7 +508,7 @@ def _add_source_to_cell(
     value_offset = sources.values[source] - sources.values[middle]
     _add_to_cell(
         cells,
-        sources.patch[source],
+        sources.region[source],
         cell,
         weight,
         weight * value_offset,
@@ -547,34 +563,34 @@ def _fill_cells(
 @numba.njit(cache=True, inline="always")
 def _cell_pair_contribution(
     sums: FloatArray,
-    patch_a: int,
+    region_a: int,
     cell_a: int,
-    patch_b: int,
+    region_b: int,
     cell_b: int,
     middle_weight: float,
     middle_error_var: float,
 ) -> Contribution:
     """Sum over all triplets with one outer source in each of two cells."""
-    weight_a = sums[patch_a, cell_a, CellStat.WEIGHT]
-    weight_b = sums[patch_b, cell_b, CellStat.WEIGHT]
+    weight_a = sums[region_a, cell_a, CellStat.WEIGHT]
+    weight_b = sums[region_b, cell_b, CellStat.WEIGHT]
     squared_diff = (
-        weight_b * sums[patch_a, cell_a, CellStat.OFFSET_SQ]
-        + weight_a * sums[patch_b, cell_b, CellStat.OFFSET_SQ]
+        weight_b * sums[region_a, cell_a, CellStat.OFFSET_SQ]
+        + weight_a * sums[region_b, cell_b, CellStat.OFFSET_SQ]
         + 2.0
-        * sums[patch_a, cell_a, CellStat.OFFSET]
-        * sums[patch_b, cell_b, CellStat.OFFSET]
+        * sums[region_a, cell_a, CellStat.OFFSET]
+        * sums[region_b, cell_b, CellStat.OFFSET]
     )
     error_bias = (
-        weight_b * sums[patch_a, cell_a, CellStat.ERROR_VAR]
-        + weight_a * sums[patch_b, cell_b, CellStat.ERROR_VAR]
+        weight_b * sums[region_a, cell_a, CellStat.ERROR_VAR]
+        + weight_a * sums[region_b, cell_b, CellStat.ERROR_VAR]
         + 4.0 * middle_error_var * weight_a * weight_b
     )
     separation = 0.5 * (
-        weight_b * sums[patch_a, cell_a, CellStat.SEPARATION]
-        + weight_a * sums[patch_b, cell_b, CellStat.SEPARATION]
+        weight_b * sums[region_a, cell_a, CellStat.SEPARATION]
+        + weight_a * sums[region_b, cell_b, CellStat.SEPARATION]
     )
     count = (
-        sums[patch_a, cell_a, CellStat.COUNT] * sums[patch_b, cell_b, CellStat.COUNT]
+        sums[region_a, cell_a, CellStat.COUNT] * sums[region_b, cell_b, CellStat.COUNT]
     )
     return Contribution(
         middle_weight * weight_a * weight_b,
@@ -614,9 +630,9 @@ def _pair_cells(
     n_rings = grid.ring_mid.size
     middle_weight = sources.weights[middle]
     middle_error_var = sources.error_var[middle]
-    middle_patch = sources.patch[middle]
+    middle_region = sources.region[middle]
     for touched in range(cells.counts[0]):
-        patch_a = cells.touched_patch[touched]
+        region_a = cells.touched_region[touched]
         cell_a = cells.touched_cell[touched]
         ring_a = cell_a // grid.n_sector
         sector_a = cell_a % grid.n_sector
@@ -630,14 +646,14 @@ def _pair_cells(
                     continue
                 cell_b = ring_b * grid.n_sector + sector_b
                 for k in range(cells.counts[1]):
-                    patch_b = cells.patches[k]
-                    if not cells.touched[patch_b, cell_b]:
+                    region_b = cells.regions[k]
+                    if not cells.touched[region_b, cell_b]:
                         continue
                     contribution = _cell_pair_contribution(
                         cells.sums,
-                        patch_a,
+                        region_a,
                         cell_a,
-                        patch_b,
+                        region_b,
                         cell_b,
                         middle_weight,
                         middle_error_var,
@@ -647,9 +663,9 @@ def _pair_cells(
                             acc,
                             slot,
                             bin_index,
-                            middle_patch,
-                            patch_a,
-                            patch_b,
+                            middle_region,
+                            region_a,
+                            region_b,
                             contribution,
                             1.0,
                         )
@@ -658,12 +674,12 @@ def _pair_cells(
 @numba.njit(cache=True)
 def _clear_cells(cells: Cells) -> None:
     for touched in range(cells.counts[0]):
-        patch = cells.touched_patch[touched]
+        region = cells.touched_region[touched]
         cell = cells.touched_cell[touched]
-        cells.sums[patch, cell, :] = 0.0
-        cells.touched[patch, cell] = False
+        cells.sums[region, cell, :] = 0.0
+        cells.touched[region, cell] = False
     for k in range(cells.counts[1]):
-        cells.patch_seen[cells.patches[k]] = False
+        cells.region_seen[cells.regions[k]] = False
     cells.counts[0] = 0
     cells.counts[1] = 0
 
@@ -675,19 +691,19 @@ def binned_triplets(
     sources: Sources,
     edges: FloatArray,
     grid: PolarGrid,
-    n_patch: int,
+    n_regions: int,
     acc: FloatArray,
 ) -> FloatArray:
     """Three-point sums from a polar grid of cells around every source.
 
     Returns:
-        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
+        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
     """
     n_sources = sources.values.size
     n_slots = acc.shape[0]
     n_cell = grid.ring_mid.size * grid.n_sector
     for slot in numba.prange(n_slots):
-        cells = _new_cells(n_patch, n_cell)
+        cells = _new_cells(n_regions, n_cell)
         for middle in range(slot, n_sources, n_slots):
             _fill_cells(middle, cells, nodes, roots, sources, grid)
             _pair_cells(acc, slot, middle, cells, sources, grid, edges)

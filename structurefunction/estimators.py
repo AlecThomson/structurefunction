@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from structurefunction._kernels.common import Kind, Stat
-from structurefunction.types import CrossPatchWeight, ErrorMethod
+from structurefunction.kernels.common import Kind, Stat
+from structurefunction.types import CrossRegionWeight, ErrorMethod
 
 if TYPE_CHECKING:
     from structurefunction.types import FloatArray
@@ -46,43 +46,43 @@ def _sf_from_totals(tot: FloatArray) -> tuple[FloatArray, FloatArray]:
 def estimate(
     acc: FloatArray,
     error_method: ErrorMethod,
-    cross_patch_weight: CrossPatchWeight,
+    cross_region_weight: CrossRegionWeight,
     n_boot: int,
     rng: np.random.Generator,
 ) -> Estimate:
     """Structure function, bias, separations and covariance.
 
     Args:
-        acc: Accumulator ``(kind, bin, patch, stat)`` summed over threads.
+        acc: Accumulator ``(kind, bin, region, stat)`` summed over threads.
         error_method: Resampling scheme.
-        cross_patch_weight: Jackknife weight for cross-patch contributions.
+        cross_region_weight: Jackknife weight for cross-region contributions.
         n_boot: Number of bootstrap resamples.
         rng: Random generator for the bootstrap.
 
     Returns:
         The estimates; ``cov`` is ``None`` for ``ErrorMethod.NONE``.
     """
-    mark = acc[Kind.MARK]  # (bin, patch, stat)
+    mark = acc[Kind.MARK]  # (bin, region, stat)
     total = mark.sum(axis=1)  # (bin, stat)
     sf, bias = _sf_from_totals(total)
     w = total[:, Stat.WEIGHT]
     with np.errstate(invalid="ignore", divide="ignore"):
         sep = np.where(w > 0, total[:, Stat.SEPARATION] / w, np.nan)
     count = total[:, Stat.COUNT]
-    n_patch = acc.shape[2]
+    n_regions = acc.shape[2]
 
     cov: FloatArray | None = None
     samples: FloatArray | None = None
-    if error_method == ErrorMethod.JACKKNIFE and n_patch > 1:
-        alpha = 0.5 if cross_patch_weight == CrossPatchWeight.MATCH else 1.0
-        removed = acc[Kind.AUTO] + alpha * acc[Kind.CROSS]  # (bin, patch, stat)
-        loo = total[:, None, :] - removed  # (bin, patch, stat)
-        samples, _ = _sf_from_totals(np.moveaxis(loo, 1, 0))  # (patch, bin)
+    if error_method == ErrorMethod.JACKKNIFE and n_regions > 1:
+        alpha = 0.5 if cross_region_weight == CrossRegionWeight.MATCH else 1.0
+        removed = acc[Kind.AUTO] + alpha * acc[Kind.CROSS]  # (bin, region, stat)
+        loo = total[:, None, :] - removed  # (bin, region, stat)
+        samples, _ = _sf_from_totals(np.moveaxis(loo, 1, 0))  # (region, bin)
         mean = _nanmean(samples)
         resid = samples - mean
-        cov = (n_patch - 1) / n_patch * _nan_outer_sum(resid)
-    elif error_method == ErrorMethod.BOOTSTRAP and n_patch > 1:
-        counts = rng.multinomial(n_patch, np.full(n_patch, 1.0 / n_patch), n_boot)
+        cov = (n_regions - 1) / n_regions * _nan_outer_sum(resid)
+    elif error_method == ErrorMethod.BOOTSTRAP and n_regions > 1:
+        counts = rng.multinomial(n_regions, np.full(n_regions, 1.0 / n_regions), n_boot)
         boot = np.einsum("sp,bpk->sbk", counts.astype(np.float64), mark)
         samples, _ = _sf_from_totals(boot)
         mean = _nanmean(samples)

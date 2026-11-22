@@ -23,8 +23,8 @@ import numpy as np
 # Exported at runtime but missing from numba's type information.
 from numba import get_thread_id  # type: ignore[attr-defined]
 
-from structurefunction._kernels.brute import add_source_pair
-from structurefunction._kernels.common import (
+from structurefunction.kernels.brute import add_source_pair
+from structurefunction.kernels.common import (
     Contribution,
     add_pair,
     chord_to_separation,
@@ -33,19 +33,20 @@ from structurefunction._kernels.common import (
     gaussian_bin_fraction,
     gaussian_bin_range,
 )
-from structurefunction._kernels.containers import Binning, Moment, Nodes, Sources
+from structurefunction.kernels.containers import Binning, Moment, Nodes, Sources
 from structurefunction.types import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)
 class Tree:
-    """A ball tree with one subtree per patch."""
+    """A ball tree with one subtree per region."""
 
     order: IntArray
     """Input index of each source in tree order."""
     roots: IntArray
-    """Root node of each patch (-1 for an empty patch)."""
+    """Root node of each region (-1 for an empty region)."""
     nodes: Nodes
+    """Node arrays, see :class:`Nodes`."""
 
 
 def build_tree(
@@ -53,36 +54,36 @@ def build_tree(
     values: FloatArray,
     error_var: FloatArray,
     weights: FloatArray,
-    patch: IntArray,
-    n_patch: int,
+    region: IntArray,
+    n_regions: int,
     max_position_var: FloatArray,
     leaf_size: int = 4,
 ) -> Tree:
-    """Build one subtree per patch, so no node spans two patches.
+    """Build one subtree per region, so no node spans two regions.
 
     Source arrays must afterwards be indexed with ``tree.order``, so that
     each node's sources are contiguous.
     """
-    by_patch = np.argsort(patch, kind="stable").astype(np.intp)
-    patch_bounds = np.searchsorted(patch[by_patch], np.arange(n_patch + 1))
+    by_region = np.argsort(region, kind="stable").astype(np.intp)
+    region_bounds = np.searchsorted(region[by_region], np.arange(n_regions + 1))
     nodes, roots, permutation = _build(
-        positions[by_patch],
-        values[by_patch],
-        error_var[by_patch],
-        weights[by_patch],
-        max_position_var[by_patch],
-        patch_bounds.astype(np.intp),
+        positions[by_region],
+        values[by_region],
+        error_var[by_region],
+        weights[by_region],
+        max_position_var[by_region],
+        region_bounds.astype(np.intp),
         leaf_size,
     )
-    return Tree(order=by_patch[permutation], roots=roots, nodes=nodes)
+    return Tree(order=by_region[permutation], roots=roots, nodes=nodes)
 
 
 def frontier(tree: Tree, min_nodes: int) -> IntArray:
     """Non-overlapping nodes that together hold every source.
 
-    Starts from the patch roots and splits the largest node until there are
+    Starts from the region roots and splits the largest node until there are
     at least ``min_nodes``, so the work can be shared between threads even
-    with a single patch.
+    with a single region.
     """
     nodes = [int(root) for root in tree.roots if root >= 0]
     while len(nodes) < min_nodes:
@@ -121,36 +122,36 @@ def _build(
     error_var: FloatArray,
     weights: FloatArray,
     max_position_var: FloatArray,
-    patch_bounds: IntArray,
+    region_bounds: IntArray,
     leaf_size: int,
 ) -> tuple[Nodes, IntArray, IntArray]:
     """Median-split construction.
 
     Returns:
-        The nodes, the root of each patch and the tree-order permutation.
+        The nodes, the root of each region and the tree-order permutation.
     """
     n_sources = positions.shape[0]
-    n_patch = patch_bounds.size - 1
-    capacity = 4 * (n_sources // max(leaf_size // 2, 1) + 1) + 2 * n_patch + 8
+    n_regions = region_bounds.size - 1
+    capacity = 4 * (n_sources // max(leaf_size // 2, 1) + 1) + 2 * n_regions + 8
     start = np.empty(capacity, np.intp)
     end = np.empty(capacity, np.intp)
     left = np.full(capacity, -1, np.intp)
-    node_patch = np.empty(capacity, np.intp)
-    roots = np.full(n_patch, -1, np.intp)
+    node_region = np.empty(capacity, np.intp)
+    roots = np.full(n_regions, -1, np.intp)
     permutation = np.arange(n_sources)
     to_split = np.empty(capacity, np.intp)
     n_node = 0
 
-    for patch in range(n_patch):
-        if patch_bounds[patch + 1] <= patch_bounds[patch]:
+    for region in range(n_regions):
+        if region_bounds[region + 1] <= region_bounds[region]:
             continue
-        roots[patch] = n_node
-        start[n_node] = patch_bounds[patch]
-        end[n_node] = patch_bounds[patch + 1]
-        node_patch[n_node] = patch
+        roots[region] = n_node
+        start[n_node] = region_bounds[region]
+        end[n_node] = region_bounds[region + 1]
+        node_region[n_node] = region
         n_node += 1
         n_pending = 1
-        to_split[0] = roots[patch]
+        to_split[0] = roots[region]
         while n_pending > 0:
             n_pending -= 1
             node = to_split[n_pending]
@@ -167,7 +168,7 @@ def _build(
             for child_start, child_end in ((first, middle), (middle, stop)):
                 start[n_node] = child_start
                 end[n_node] = child_end
-                node_patch[n_node] = patch
+                node_region[n_node] = region
                 to_split[n_pending] = n_node
                 n_pending += 1
                 n_node += 1
@@ -188,7 +189,7 @@ def _build(
         centre,
         radius,
         moments,
-        node_patch[:n_node],
+        node_region[:n_node],
     )
     return nodes, roots, permutation
 
@@ -278,8 +279,8 @@ def _add_node_pair_to_bin(
         acc,
         slot,
         bin_index,
-        nodes.patch[node_a],
-        nodes.patch[node_b],
+        nodes.region[node_a],
+        nodes.region[node_b],
         contribution,
         fraction,
     )
@@ -544,7 +545,7 @@ def tree_pairs(
     source pair is counted once.
 
     Returns:
-        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
+        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
     """
     n_start = start_nodes.size
     n_tasks = n_start * (n_start + 1) // 2

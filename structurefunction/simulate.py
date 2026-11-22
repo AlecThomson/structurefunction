@@ -44,10 +44,10 @@ def sample_field(
     n_sources: int,
     rng: np.random.Generator | int | None = None,
 ) -> tuple[SkyCoord, FloatArray]:
-    """Sample a square field at random positions on a patch of sky.
+    """Sample a square field at random positions on a region of sky.
 
     The field covers ``size`` x ``size`` centred on (lon, lat) = (size/2, 0).
-    The patch should be small enough that the sky is close to flat.
+    The region should be small enough that the sky is close to flat.
 
     Returns:
         The source positions and the interpolated field values.

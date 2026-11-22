@@ -1,6 +1,6 @@
 """Power-law model fits to structure functions using the full covariance.
 
-The covariance is estimated from ``n_patch`` resamples, so it is itself noisy.
+The covariance is estimated from ``n_regions`` resamples, so it is itself noisy.
 The default likelihood marginalises over that noise (Sellentin & Heavens
 2016, MNRAS 456, L132): ``ln L = -(n_s / 2) ln(1 + chi^2 / (n_s - 1))``.
 """
@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import astropy.units as u
 import numpy as np
 from astropy.table import QTable
+from capn_crunch import BaseOptions
 from scipy.optimize import least_squares, minimize
 
 from structurefunction.logging import logger
@@ -74,10 +75,13 @@ class FitResult:
     """
 
     model: FitModel
+    """The fitted model."""
     names: tuple[str, ...]
+    """Parameter names, in the order of the parameter arrays."""
     map: FloatArray
     """Maximum a-posteriori parameters."""
     median: FloatArray
+    """Posterior median of each parameter."""
     lower: FloatArray
     """16th percentile (Laplace approximation for ``sampler='map'``)."""
     upper: FloatArray
@@ -87,33 +91,43 @@ class FitResult:
     log_evidence: float | None
     """``ln Z`` (nautilus only)."""
     chi2: float
+    """Chi-squared at the best fit."""
     n_data: int
+    """Number of bins fitted."""
     aic: float
+    """Akaike information criterion at the best fit."""
     bic: float
+    """Bayesian information criterion at the best fit."""
     pivot: float
     """Reference separation of the plain power law (separation unit)."""
     separation_unit: u.UnitBase
+    """Unit of separations for the break and pivot."""
     sf_unit: u.UnitBase | None
-
-    def evaluate(
-        self, separation: FloatArray | u.Quantity, theta: FloatArray | None = None
-    ) -> FloatArray:
-        """Model structure function at ``separation`` for ``theta`` (default MAP)."""
-        r = (
-            separation.to_value(self.separation_unit)
-            if isinstance(separation, u.Quantity)
-            else np.asarray(separation, dtype=np.float64)
-        )
-        th = self.map if theta is None else theta
-        return _model_fn(self.model, self.pivot)(r, th)
+    """Unit of the structure function, or ``None`` for plain arrays."""
 
 
-@dataclass(frozen=True, slots=True)
-class FitPriors:
+def evaluate(
+    fit: FitResult,
+    separation: FloatArray | u.Quantity,
+    theta: FloatArray | None = None,
+) -> FloatArray:
+    """Model structure function at ``separation`` for ``theta`` (default: best fit)."""
+    r = (
+        separation.to_value(fit.separation_unit)
+        if isinstance(separation, u.Quantity)
+        else np.asarray(separation, dtype=np.float64)
+    )
+    parameters = fit.map if theta is None else theta
+    return _model_fn(fit.model, fit.pivot)(r, parameters)
+
+
+class FitPriors(BaseOptions):
     """Uniform prior bounds; ``None`` derives them from the data."""
 
     log10_amplitude: tuple[float, float] | None = None
+    """Range of log10 amplitude (default: data range +/- 3 dex)."""
     log10_break: tuple[float, float] | None = None
+    """Range of log10 break separation (default: range of the bins)."""
     slope: tuple[float, float] = (0.0, 6.0)
     """Structure functions do not decrease with separation, so slopes are >= 0."""
 
@@ -197,7 +211,7 @@ def fit_sf(
         likelihood: How the estimated covariance enters the likelihood.
         priors: Uniform prior bounds.
         use: Bins to fit (default: ``result.reliable``). Bins larger than the
-            resampling patches have underestimated errors; to leave them out,
+            resampling regions have underestimated errors; to leave them out,
             pass ``result.reliable & result.resampling_reliable``.
         n_walkers: emcee walkers.
         n_steps: emcee steps per walker.
@@ -236,7 +250,9 @@ def fit_sf(
 
     chol = np.linalg.cholesky(cov)
     n_s = (
-        result.n_patch if result.error_method == ErrorMethod.JACKKNIFE else n_data * 10
+        result.n_regions
+        if result.error_method == ErrorMethod.JACKKNIFE
+        else n_data * 10
     )
     pivot = float(np.exp(np.mean(np.log(r))))
     fn = _model_fn(model, pivot)

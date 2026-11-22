@@ -8,4 +8,4 @@ logger = logging.getLogger("structurefunction")
 
 
 class StructureFunctionWarning(UserWarning):
-    """Warns about estimates that may be unreliable (e.g. too few patches)."""
+    """Warns about estimates that may be unreliable (e.g. too few regions)."""

@@ -7,7 +7,7 @@ import math
 import numba
 import numpy as np
 
-from structurefunction._kernels.common import (
+from structurefunction.kernels.common import (
     Contribution,
     add_pair,
     chord_to_separation,
@@ -17,7 +17,7 @@ from structurefunction._kernels.common import (
     gaussian_bin_range,
     projected_position_var,
 )
-from structurefunction._kernels.containers import Binning, Sources
+from structurefunction.kernels.containers import Binning, Sources
 from structurefunction.types import FloatArray
 
 
@@ -28,8 +28,8 @@ def add_pair_to_bins(
     separation: float,
     sigma: float,
     bins: Binning,
-    patch_a: int,
-    patch_b: int,
+    region_a: int,
+    region_b: int,
     contribution: Contribution,
 ) -> None:
     """Add a pair to its bin, or spread it over bins if its separation is uncertain.
@@ -40,7 +40,7 @@ def add_pair_to_bins(
     if sigma <= 0.0:
         bin_index = find_bin(separation, bins.edges)
         if bin_index >= 0:
-            add_pair(acc, slot, bin_index, patch_a, patch_b, contribution, 1.0)
+            add_pair(acc, slot, bin_index, region_a, region_b, contribution, 1.0)
         return
     first, last = gaussian_bin_range(separation, sigma, bins.edges)
     if first < 0:
@@ -48,7 +48,7 @@ def add_pair_to_bins(
     for bin_index in range(first, last + 1):
         fraction = gaussian_bin_fraction(separation, sigma, bins.edges, bin_index)
         if fraction > 0.0:
-            add_pair(acc, slot, bin_index, patch_a, patch_b, contribution, fraction)
+            add_pair(acc, slot, bin_index, region_a, region_b, contribution, fraction)
 
 
 @numba.njit(cache=True, inline="always")
@@ -91,8 +91,8 @@ def add_source_pair(
         separation,
         sigma,
         bins,
-        sources.patch[i],
-        sources.patch[j],
+        sources.region[i],
+        sources.region[j],
         contribution,
     )
 
@@ -104,7 +104,7 @@ def brute_pairs(sources: Sources, bins: Binning, acc: FloatArray) -> FloatArray:
     Rows are interleaved between threads to balance the triangular loop.
 
     Returns:
-        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
+        Accumulator summed over threads, shape ``(kind, bin, region, stat)``.
     """
     n_sources = sources.values.size
     n_slots = acc.shape[0]

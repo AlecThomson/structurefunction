@@ -1,18 +1,12 @@
-"""Result container for structure functions, with astropy Table round-trips."""
+"""Result container for structure functions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import astropy.units as u
-import numpy as np
-from astropy.table import QTable, Table
 
-from structurefunction.types import ErrorMethod, FloatArray
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from structurefunction.types import BoolArray, ErrorMethod, FloatArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +15,7 @@ class SFResult[V: (FloatArray, u.Quantity)]:
 
     ``V`` is ``Quantity`` when the input values had units (the structure
     function then carries ``unit**2``) and a plain float array otherwise.
+    See :mod:`structurefunction.io` for reading and writing.
     """
 
     sf: V
@@ -43,139 +38,19 @@ class SFResult[V: (FloatArray, u.Quantity)]:
     """Sum of stencil weights per bin."""
     n_point: int
     """Number of points in the stencil."""
-    n_patch: int
-    """Number of spatial patches used for resampling."""
+    n_regions: int
+    """Number of spatial regions used for resampling."""
     error_method: ErrorMethod
     """How ``cov`` was estimated."""
     min_count: int
     """Bins with fewer contributions are flagged as unreliable."""
-    patch_size: u.Quantity | None = None
-    """Typical diameter of the resampling patches."""
+    reliable: BoolArray
+    """Bins with at least ``min_count`` contributions and a finite estimate."""
+    region_size: u.Quantity | None
+    """Typical diameter of the resampling regions (``None`` if unknown)."""
+    resampling_reliable: BoolArray
+    """Bins smaller than the typical region size.
 
-    @property
-    def resampling_reliable(self) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
-        """Bins smaller than the typical patch size.
-
-        Patch resampling misses variance on scales larger than a patch, so the
-        errors of the other bins are underestimated.
-        """
-        if self.patch_size is None:
-            return np.ones(self.count.size, dtype=bool)
-        return np.asarray(self.separation < self.patch_size, dtype=bool)
-
-    @property
-    def reliable(self) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
-        """Bins with at least ``min_count`` contributions and a finite estimate."""
-        sf = np.asarray(u.Quantity(self.sf).value if self.has_units else self.sf)
-        return (self.count >= self.min_count) & np.isfinite(sf)
-
-    @property
-    def has_units(self) -> bool:
-        """Whether the input values carried units."""
-        return isinstance(self.sf, u.Quantity)
-
-    def to_table(self) -> QTable:
-        """One row per bin; covariance as a vector column; settings in ``meta``."""
-        t = QTable()
-        t["separation"] = self.separation
-        t["bin_lo"] = self.bin_edges[:-1]
-        t["bin_hi"] = self.bin_edges[1:]
-        t["sf"] = self.sf
-        t["sf_err"] = self.sf_err
-        t["noise_bias"] = self.noise_bias
-        t["count"] = self.count
-        t["weight"] = self.weight
-        t["reliable"] = self.reliable
-        if self.cov is not None:
-            t["cov"] = self.cov
-        t.meta.update(
-            n_point=self.n_point,
-            n_patch=self.n_patch,
-            error_method=str(self.error_method),
-            min_count=self.min_count,
-            saturation=(
-                float(u.Quantity(self.saturation).value)
-                if self.has_units
-                else float(np.asarray(self.saturation))
-            ),
-            unit=str(u.Quantity(self.sf).unit) if self.has_units else None,
-            patch_size=None
-            if self.patch_size is None
-            else float(self.patch_size.value),
-            patch_size_unit=None
-            if self.patch_size is None
-            else str(self.patch_size.unit),
-        )
-        return t
-
-    def write(self, path: str | Path, overwrite: bool = False) -> None:
-        """Write to any astropy-writable table format (ECSV recommended)."""
-        self.to_table().write(path, overwrite=overwrite)
-
-    @classmethod
-    def from_table(cls, table: Table) -> SFResult[FloatArray] | SFResult[u.Quantity]:
-        """Rebuild a result written by :meth:`to_table`."""
-        t = QTable(table)
-        meta = t.meta
-        unit = u.Unit(meta["unit"]) if meta.get("unit") else None
-        edges = np.append(t["bin_lo"].value, t["bin_hi"].value[-1]) * t["bin_lo"].unit
-        cov = np.asarray(t["cov"]) if "cov" in t.colnames else None
-
-        def values(name: str) -> FloatArray:
-            col = t[name]
-            return np.asarray(col.value if hasattr(col, "unit") else col, float)
-
-        sf = values("sf")
-        sf_err = values("sf_err")
-        bias = values("noise_bias")
-        sat = np.asarray(meta["saturation"], dtype=np.float64)
-        sep = t["separation"]
-        count = values("count")
-        weight = values("weight")
-        n_point = int(meta["n_point"])
-        n_patch = int(meta["n_patch"])
-        method = ErrorMethod(meta["error_method"])
-        min_count = int(meta["min_count"])
-        patch_size = (
-            u.Quantity(meta["patch_size"], u.Unit(meta["patch_size_unit"]))
-            if meta.get("patch_size") is not None
-            else None
-        )
-        if unit is None:
-            return SFResult[FloatArray](
-                sf=sf,
-                sf_err=sf_err,
-                noise_bias=bias,
-                saturation=sat,
-                cov=cov,
-                separation=sep,
-                bin_edges=edges,
-                count=count,
-                weight=weight,
-                n_point=n_point,
-                n_patch=n_patch,
-                error_method=method,
-                min_count=min_count,
-                patch_size=patch_size,
-            )
-        return SFResult[u.Quantity](
-            sf=u.Quantity(sf, unit),
-            sf_err=u.Quantity(sf_err, unit),
-            noise_bias=u.Quantity(bias, unit),
-            saturation=u.Quantity(sat, unit),
-            cov=cov,
-            separation=sep,
-            bin_edges=edges,
-            count=count,
-            weight=weight,
-            n_point=n_point,
-            n_patch=n_patch,
-            error_method=method,
-            min_count=min_count,
-            patch_size=patch_size,
-        )
-
-    @classmethod
-    def read(cls, path: str | Path) -> SFResult[FloatArray] | SFResult[u.Quantity]:
-        """Read a result written by :meth:`write`."""
-        return cls.from_table(Table.read(path))
+    Region resampling misses variance on scales larger than a region, so the
+    errors of the other bins are underestimated.
+    """

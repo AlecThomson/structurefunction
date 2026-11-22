@@ -1,16 +1,16 @@
 """Accumulator layout and helpers shared by all kernels.
 
-Accumulators have shape ``(slot, kind, bin, patch, stat)``. ``slot`` is a
+Accumulators have shape ``(slot, kind, bin, region, stat)``. ``slot`` is a
 per-thread copy (summed at the end), ``kind`` is one of :class:`Kind` and
 ``stat`` one of :class:`Stat`.
 
-For a pair or triplet whose sources lie in a set of patches:
+For a pair or triplet whose sources lie in a set of regions:
 
-* ``AUTO[p]`` receives it if every source is in patch ``p``;
-* ``CROSS[p]`` receives it, for each patch ``p`` in the set, otherwise;
+* ``AUTO[p]`` receives it if every source is in region ``p``;
+* ``CROSS[p]`` receives it, for each region ``p`` in the set, otherwise;
 * ``MARK[p]`` receives the fraction of its sources that are in ``p``.
 
-Summing ``MARK`` over patches gives the full-sample total, and leaving patch
+Summing ``MARK`` over regions gives the full-sample total, and leaving region
 ``p`` out removes ``AUTO[p] + CROSS[p]``.
 """
 
@@ -30,8 +30,11 @@ class Kind(IntEnum):
     """Accumulator kinds (axis 1)."""
 
     AUTO = 0
+    """Pairs or triplets with every source in the region."""
     CROSS = 1
+    """Pairs or triplets with sources in this and other regions."""
     MARK = 2
+    """Share of each pair or triplet by the fraction of its sources in the region."""
 
 
 class Stat(IntEnum):
@@ -53,17 +56,22 @@ class Contribution(NamedTuple):
     """What one pair, triplet or group of them adds to a bin."""
 
     weight: float
+    """Stencil weight (product of the source weights)."""
     squared_diff: float
+    """Weight times the squared stencil difference."""
     error_bias: float
+    """Weight times the error term ``sum_i c_i^2 sigma_i^2``."""
     separation: float
     """Weighted separation, i.e. ``weight * separation``."""
     n_terms: float
     """Number of pairs or triplets."""
 
 
-def new_accumulator(n_slots: int, n_bins: int, n_patch: int) -> FloatArray:
+def new_accumulator(n_slots: int, n_bins: int, n_regions: int) -> FloatArray:
     """Allocate zeroed per-thread accumulators."""
-    return np.zeros((n_slots, len(Kind), n_bins, n_patch, len(Stat)), dtype=np.float64)
+    return np.zeros(
+        (n_slots, len(Kind), n_bins, n_regions, len(Stat)), dtype=np.float64
+    )
 
 
 @numba.njit(cache=True, inline="always")
@@ -129,22 +137,22 @@ def _add(
     slot: int,
     kind: int,
     bin_index: int,
-    patch: int,
+    region: int,
     contribution: Contribution,
     fraction: float,
 ) -> None:
     # Indexed in full rather than via a row slice, which is slower in numba.
-    acc[slot, kind, bin_index, patch, Stat.WEIGHT] += fraction * contribution.weight
-    acc[slot, kind, bin_index, patch, Stat.SQUARED_DIFF] += (
+    acc[slot, kind, bin_index, region, Stat.WEIGHT] += fraction * contribution.weight
+    acc[slot, kind, bin_index, region, Stat.SQUARED_DIFF] += (
         fraction * contribution.squared_diff
     )
-    acc[slot, kind, bin_index, patch, Stat.ERROR_BIAS] += (
+    acc[slot, kind, bin_index, region, Stat.ERROR_BIAS] += (
         fraction * contribution.error_bias
     )
-    acc[slot, kind, bin_index, patch, Stat.SEPARATION] += (
+    acc[slot, kind, bin_index, region, Stat.SEPARATION] += (
         fraction * contribution.separation
     )
-    acc[slot, kind, bin_index, patch, Stat.COUNT] += fraction * contribution.n_terms
+    acc[slot, kind, bin_index, region, Stat.COUNT] += fraction * contribution.n_terms
 
 
 @numba.njit(cache=True, inline="always")
@@ -152,21 +160,21 @@ def add_pair(
     acc: FloatArray,
     slot: int,
     bin_index: int,
-    patch_a: int,
-    patch_b: int,
+    region_a: int,
+    region_b: int,
     contribution: Contribution,
     fraction: float,
 ) -> None:
     """Add ``fraction`` of a pair (or of all pairs between two groups)."""
-    if patch_a == patch_b:
-        _add(acc, slot, Kind.AUTO, bin_index, patch_a, contribution, fraction)
-        _add(acc, slot, Kind.MARK, bin_index, patch_a, contribution, fraction)
+    if region_a == region_b:
+        _add(acc, slot, Kind.AUTO, bin_index, region_a, contribution, fraction)
+        _add(acc, slot, Kind.MARK, bin_index, region_a, contribution, fraction)
         return
     half = 0.5 * fraction
-    _add(acc, slot, Kind.CROSS, bin_index, patch_a, contribution, fraction)
-    _add(acc, slot, Kind.CROSS, bin_index, patch_b, contribution, fraction)
-    _add(acc, slot, Kind.MARK, bin_index, patch_a, contribution, half)
-    _add(acc, slot, Kind.MARK, bin_index, patch_b, contribution, half)
+    _add(acc, slot, Kind.CROSS, bin_index, region_a, contribution, fraction)
+    _add(acc, slot, Kind.CROSS, bin_index, region_b, contribution, fraction)
+    _add(acc, slot, Kind.MARK, bin_index, region_a, contribution, half)
+    _add(acc, slot, Kind.MARK, bin_index, region_b, contribution, half)
 
 
 @numba.njit(cache=True, inline="always")
@@ -174,27 +182,27 @@ def add_triplet(
     acc: FloatArray,
     slot: int,
     bin_index: int,
-    patch_middle: int,
-    patch_a: int,
-    patch_b: int,
+    region_middle: int,
+    region_a: int,
+    region_b: int,
     contribution: Contribution,
     fraction: float,
 ) -> None:
-    """Add ``fraction`` of a triplet (or of a group sharing these patches)."""
-    if patch_middle == patch_a == patch_b:
-        _add(acc, slot, Kind.AUTO, bin_index, patch_middle, contribution, fraction)
-        _add(acc, slot, Kind.MARK, bin_index, patch_middle, contribution, fraction)
+    """Add ``fraction`` of a triplet (or of a group sharing these regions)."""
+    if region_middle == region_a == region_b:
+        _add(acc, slot, Kind.AUTO, bin_index, region_middle, contribution, fraction)
+        _add(acc, slot, Kind.MARK, bin_index, region_middle, contribution, fraction)
         return
-    # Each distinct patch once in CROSS; MARK by the share of sources.
-    _add(acc, slot, Kind.CROSS, bin_index, patch_middle, contribution, fraction)
-    if patch_a != patch_middle:
-        _add(acc, slot, Kind.CROSS, bin_index, patch_a, contribution, fraction)
-    if patch_b not in (patch_middle, patch_a):
-        _add(acc, slot, Kind.CROSS, bin_index, patch_b, contribution, fraction)
+    # Each distinct region once in CROSS; MARK by the share of sources.
+    _add(acc, slot, Kind.CROSS, bin_index, region_middle, contribution, fraction)
+    if region_a != region_middle:
+        _add(acc, slot, Kind.CROSS, bin_index, region_a, contribution, fraction)
+    if region_b not in (region_middle, region_a):
+        _add(acc, slot, Kind.CROSS, bin_index, region_b, contribution, fraction)
     third = fraction / 3.0
-    _add(acc, slot, Kind.MARK, bin_index, patch_middle, contribution, third)
-    _add(acc, slot, Kind.MARK, bin_index, patch_a, contribution, third)
-    _add(acc, slot, Kind.MARK, bin_index, patch_b, contribution, third)
+    _add(acc, slot, Kind.MARK, bin_index, region_middle, contribution, third)
+    _add(acc, slot, Kind.MARK, bin_index, region_a, contribution, third)
+    _add(acc, slot, Kind.MARK, bin_index, region_b, contribution, third)
 
 
 @numba.njit(cache=True, inline="always")

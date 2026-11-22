@@ -57,7 +57,7 @@ plenty of sources.
 
 ## Speed
 
-Sources are stored in a tree, one subtree per patch. For two well separated
+Sources are stored in a tree, one subtree per region. For two well separated
 groups of sources, the sum of $(\mathrm{RM}_i - \mathrm{RM}_j)^2$ over every pair
 between them follows from each group's mean and spread, without visiting the
 pairs. A group pair is handled this way when all its pairs fall in the same bin.
@@ -71,18 +71,19 @@ catalogue), the top bin is treated as open, since no pair can lie beyond it.
 
 ## Errors
 
-The sky is split into patches (k-means). The jackknife recomputes the structure
-function with each patch left out in turn; the spread of those estimates gives
-the covariance between bins. This includes the measurement errors and the
+The errors come from **jackknife regions**: the catalogue is split into compact
+areas of sky of similar size (by k-means clustering of the source positions),
+and the structure function is recomputed with each region left out in turn. The
+spread of those estimates gives the covariance between bins. This includes the measurement errors and the
 variation between different parts of the sky. It misses variance on scales
-larger than a patch, so errors of bins beyond the typical patch size
-(`SFResult.patch_size`, `SFResult.resampling_reliable`) are underestimated. The
-bootstrap option resamples patches instead.
+larger than a region, so errors of bins beyond the typical region size
+(`SFResult.region_size`, `SFResult.resampling_reliable`) are underestimated. The
+bootstrap option resamples regions instead.
 
 ## Fitting and choosing a model
 
 Models are fitted using the full covariance. Because the covariance is itself
-estimated from a finite number of patches, the default likelihood is that of
+estimated from a finite number of regions, the default likelihood is that of
 Sellentin & Heavens (2016). Slopes are limited to be non-negative by default,
 since a structure function does not fall with separation.
 

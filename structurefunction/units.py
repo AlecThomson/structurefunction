@@ -32,9 +32,13 @@ class Values:
     """Unitless values, errors and weights plus the unit they came with."""
 
     values: FloatArray
+    """Values without units."""
     errors: FloatArray
+    """1-sigma errors in the unit of ``values`` (zeros if none)."""
     weights: FloatArray
+    """Source weights (ones if none)."""
     unit: u.UnitBase | None
+    """Unit of the input values, or ``None`` for plain arrays."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +50,15 @@ class Positions:
     """
 
     xyz: FloatArray
+    """Unit vectors, or 3D positions with distances, shape ``(n, 3)``."""
     lon: FloatArray
+    """Longitude in the frame of the input coordinates, radians."""
     lat: FloatArray
+    """Latitude in the frame of the input coordinates, radians."""
     angular: bool
+    """Whether separations are angles (no distances given)."""
     unit: u.UnitBase
+    """Unit of internal separations: radians, or the distance unit."""
 
 
 def _is_quantity(x: object) -> bool:

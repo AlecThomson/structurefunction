@@ -10,13 +10,18 @@ from astropy.coordinates import SkyCoord
 from astropy_healpix import HEALPix
 
 from structurefunction import (
-    SkyMapResult,
     StructureFunctionWarning,
     Taper,
     structure_function,
     structure_function_skymap,
 )
-from structurefunction.skymap import pixel_size, recommend_nside, taper_weights
+from structurefunction.io import read_skymap, write
+from structurefunction.skymap import (
+    healpix_map,
+    pixel_size,
+    recommend_nside,
+    taper_weights,
+)
 from structurefunction.types import TaperLike
 
 if TYPE_CHECKING:
@@ -50,7 +55,7 @@ def test_cell_matches_direct_weighted_call() -> None:
         nside=2,
         radius=15 * u.deg,
         bins=edges,
-        patches=8,
+        regions=8,
         fit_model=None,
         pixels=[5],
         bin_tolerance=0.0,
@@ -67,7 +72,7 @@ def test_cell_matches_direct_weighted_call() -> None:
         c[keep],
         bins=edges,
         weights=w[keep],
-        patches=8,
+        regions=8,
         bin_tolerance=0.0,
         rng=0,
     )
@@ -85,7 +90,7 @@ def test_white_noise_map_is_flat(tmp_path: Path) -> None:
         radius=40 * u.deg,
         bins=4,
         min_sep=2 * u.deg,
-        patches=16,
+        regions=16,
         fit_model="power_law",
         rng=1,
     )
@@ -93,13 +98,13 @@ def test_white_noise_map_is_flat(tmp_path: Path) -> None:
     # Debiased SF of white noise with variance 4: 2 * 4 = 8 everywhere.
     pull = (res.sf - 8.0) / res.sf_err
     assert np.all(np.abs(pull) < 5)
-    slope = res.map("slope")
+    slope = healpix_map(res, "slope")
     assert np.all(np.abs(slope - 0.0) < 0.5)
     out = tmp_path / "map.ecsv"
-    res.write(out)
-    back = SkyMapResult.read(out)
-    np.testing.assert_allclose(back.map("sf", 1), res.map("sf", 1))
-    np.testing.assert_allclose(back.map("slope"), slope)
+    write(res, out)
+    back = read_skymap(out)
+    np.testing.assert_allclose(healpix_map(back, "sf", 1), healpix_map(res, "sf", 1))
+    np.testing.assert_allclose(healpix_map(back, "slope"), slope)
 
 
 def test_sparse_cells_are_skipped() -> None:
@@ -115,12 +120,12 @@ def test_sparse_cells_are_skipped() -> None:
         min_sources=30,
         fit_model=None,
     )
-    m = res.map("sf", 0)
+    m = healpix_map(res, "sf", 0)
     assert np.isnan(m).sum() == m.size - res.pixels.size
     with pytest.raises(ValueError, match="bin_index"):
-        res.map("sf")
+        healpix_map(res, "sf")
     with pytest.raises(KeyError):
-        res.map("nope")
+        healpix_map(res, "nope")
 
 
 def test_cli_and_plot(tmp_path: Path) -> None:
@@ -165,7 +170,7 @@ def test_cli_and_plot(tmp_path: Path) -> None:
         ]
     )
     cli(args)
-    assert SkyMapResult.read(out).pixels.size == 12
+    assert read_skymap(out).pixels.size == 12
     assert png.stat().st_size > 0
 
 
@@ -198,7 +203,9 @@ def test_auto_nside_matches_explicit() -> None:
         rng=0,
     )
     assert auto.nside == explicit.nside == recommend_nside(radius)
-    np.testing.assert_allclose(auto.map("sf", 1), explicit.map("sf", 1))
+    np.testing.assert_allclose(
+        healpix_map(auto, "sf", 1), healpix_map(explicit, "sf", 1)
+    )
 
 
 def test_sparse_catalogue_warns() -> None:

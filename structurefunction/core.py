@@ -10,11 +10,7 @@ import astropy.units as u
 import numba
 import numpy as np
 
-from structurefunction import _units
-from structurefunction._kernels.common import new_accumulator
-from structurefunction._kernels.containers import Binning, PolarGrid, Sources
-from structurefunction._kernels.tree import Tree, build_tree, frontier, tree_pairs
-from structurefunction._kernels.triplets import binned_triplets, exact_triplets
+from structurefunction import units
 from structurefunction.estimators import estimate
 from structurefunction.geometry import (
     chord_to_separation,
@@ -22,13 +18,17 @@ from structurefunction.geometry import (
     separation_range,
     tangent_basis,
 )
+from structurefunction.kernels.common import new_accumulator
+from structurefunction.kernels.containers import Binning, PolarGrid, Sources
+from structurefunction.kernels.tree import Tree, build_tree, frontier, tree_pairs
+from structurefunction.kernels.triplets import binned_triplets, exact_triplets
 from structurefunction.logging import StructureFunctionWarning, logger
 from structurefunction.options import StencilOptions
-from structurefunction.patches import make_patches
+from structurefunction.regions import make_regions
 from structurefunction.results import SFResult
 from structurefunction.types import (
-    CrossPatchWeight,
-    CrossPatchWeightLike,
+    CrossRegionWeight,
+    CrossRegionWeightLike,
     ErrorMethod,
     ErrorMethodLike,
     FloatArray,
@@ -54,9 +54,9 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    patches: int | ArrayLike = 64,
+    regions: int | ArrayLike = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_patch_weight: CrossPatchWeightLike = CrossPatchWeight.SIMPLE,
+    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
     bin_tolerance: float = 0.05,
     pos_errors: PositionErrors | None = None,
@@ -76,9 +76,9 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    patches: int | ArrayLike = 64,
+    regions: int | ArrayLike = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_patch_weight: CrossPatchWeightLike = CrossPatchWeight.SIMPLE,
+    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
     bin_tolerance: float = 0.05,
     pos_errors: PositionErrors | None = None,
@@ -98,9 +98,9 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    patches: int | ArrayLike = 64,
+    regions: int | ArrayLike = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_patch_weight: CrossPatchWeightLike = CrossPatchWeight.SIMPLE,
+    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
     bin_tolerance: float = 0.05,
     pos_errors: PositionErrors | None = None,
@@ -119,9 +119,9 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    patches: int | ArrayLike = 64,
+    regions: int | ArrayLike = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_patch_weight: CrossPatchWeightLike = CrossPatchWeight.SIMPLE,
+    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
     bin_tolerance: float = 0.05,
     pos_errors: PositionErrors | None = None,
@@ -132,7 +132,8 @@ def structure_function(
     """Second-order structure function with a 2- or 3-point stencil.
 
     The noise bias ``<sum_i c_i^2 sigma_i^2>`` is subtracted exactly. The
-    covariance between bins comes from resampling spatial patches, so it
+    covariance between bins comes from jackknife regions (compact areas of sky
+    left out in turn; see :mod:`structurefunction.regions`), so it
     includes measurement noise, sample variance and bin-to-bin correlation.
 
     Args:
@@ -149,16 +150,18 @@ def structure_function(
             separation.
         weights: Optional non-negative per-source weights. A pair is weighted
             by the product of its members' weights.
-        patches: Number of k-means patches, or a patch label per source.
+        regions: Number of jackknife regions (found by k-means on positions),
+            or a region label per source. Use several times as many regions as
+            bins, each larger than the separations of interest.
         error_method: ``jackknife`` (default), ``bootstrap`` or ``none``.
-        cross_patch_weight: Jackknife weight of cross-patch contributions.
+        cross_region_weight: Jackknife weight of cross-region contributions.
         n_boot: Number of bootstrap resamples.
         bin_tolerance: Largest fraction of a bin width by which pairs grouped
             in the tree may be misplaced. ``0`` is exact (2-point only).
         pos_errors: Optional positional errors; pairs are then softly binned.
         stencil: Triplet-selection options for ``n_point=3``.
         min_count: Bins with fewer contributions are flagged unreliable.
-        rng: Random generator or seed (patches and bootstrap).
+        rng: Random generator or seed (regions and bootstrap).
 
     Returns:
         The structure function, its covariance and per-bin diagnostics.
@@ -168,7 +171,7 @@ def structure_function(
         NotImplementedError: For combinations not yet supported.
     """
     method = ErrorMethod(error_method)
-    cpw = CrossPatchWeight(cross_patch_weight)
+    cpw = CrossRegionWeight(cross_region_weight)
     stencil = StencilOptions() if stencil is None else stencil
     gen = np.random.default_rng(rng)
     if n_point not in {2, 3}:
@@ -178,8 +181,8 @@ def structure_function(
         msg = f"bin_tolerance must be >= 0, got {bin_tolerance}"
         raise ValueError(msg)
 
-    vals = _units.split_values(values, errors, weights)
-    pos = _units.positions(coords)
+    vals = units.split_values(values, errors, weights)
+    pos = units.positions(coords)
     n = vals.values.size
     if pos.xyz.shape[0] != n:
         msg = f"{n} values but {pos.xyz.shape[0]} coordinates"
@@ -190,8 +193,8 @@ def structure_function(
 
     edges = _edges(bins, min_sep, max_sep, pos)
     n_bins = edges.size - 1
-    patch_info = make_patches(pos.xyz, patches, gen)
-    labels = patch_info.labels
+    region_info = make_regions(pos.xyz, regions, gen)
+    labels = region_info.labels
 
     error_var = vals.errors**2
     position_cov, max_position_var = _position_covariance(pos_errors, pos)
@@ -201,17 +204,17 @@ def structure_function(
         error_var,
         vals.weights,
         labels,
-        patch_info.n_patch,
+        region_info.n_regions,
         max_position_var,
     )
     sources = _sources_in_tree_order(tree, pos, vals, error_var, labels, position_cov)
-    acc = new_accumulator(numba.get_num_threads(), n_bins, patch_info.n_patch)
+    acc = new_accumulator(numba.get_num_threads(), n_bins, region_info.n_regions)
     logger.info(
-        "Computing %d-point SF: %d sources, %d bins, %d patches",
+        "Computing %d-point SF: %d sources, %d bins, %d regions",
         n_point,
         n,
         n_bins,
-        patch_info.n_patch,
+        region_info.n_regions,
     )
     if n_point == 2:
         # With the default upper edge (the largest separation in the data) no
@@ -235,14 +238,16 @@ def structure_function(
             edges,
             stencil,
             pos_errors is not None,
-            patch_info.n_patch,
+            region_info.n_regions,
             acc,
         )
 
     est = estimate(summed, method, cpw, n_boot, gen)
-    patch_size = float(chord_to_separation(np.array([patch_info.size]), pos.angular)[0])
-    _check_resampling(method, patch_info.n_patch, n_bins, edges, patch_size)
-    reported_patch_size = _units.to_reported_separation(np.array([patch_size]), pos)[0]
+    region_size = float(
+        chord_to_separation(np.array([region_info.size]), pos.angular)[0]
+    )
+    _check_resampling(method, region_info.n_regions, n_bins, edges, region_size)
+    reported_region_size = units.to_reported_separation(np.array([region_size]), pos)[0]
 
     wsum = vals.weights.sum()
     mu = np.sum(vals.weights * vals.values) / wsum
@@ -252,9 +257,11 @@ def structure_function(
     sf_err = (
         np.sqrt(np.diag(est.cov)) if est.cov is not None else np.full(n_bins, np.nan)
     )
-    sep_q = _units.to_reported_separation(est.separation, pos)
-    edges_q = _units.to_reported_separation(edges, pos)
-    common_method = method if patch_info.n_patch > 1 else ErrorMethod.NONE
+    sep_q = units.to_reported_separation(est.separation, pos)
+    edges_q = units.to_reported_separation(edges, pos)
+    common_method = method if region_info.n_regions > 1 else ErrorMethod.NONE
+    reliable = (est.count >= min_count) & np.isfinite(est.sf)
+    resampling_reliable = np.asarray(sep_q < reported_region_size, dtype=bool)
     unit = vals.unit
     if unit is None:
         return SFResult[FloatArray](
@@ -268,10 +275,12 @@ def structure_function(
             count=est.count,
             weight=est.weight,
             n_point=n_point,
-            n_patch=patch_info.n_patch,
+            n_regions=region_info.n_regions,
             error_method=common_method,
             min_count=min_count,
-            patch_size=reported_patch_size,
+            reliable=reliable,
+            region_size=reported_region_size,
+            resampling_reliable=resampling_reliable,
         )
     unit2 = unit**2
     return SFResult[u.Quantity](
@@ -285,10 +294,12 @@ def structure_function(
         count=est.count,
         weight=est.weight,
         n_point=n_point,
-        n_patch=patch_info.n_patch,
+        n_regions=region_info.n_regions,
         error_method=common_method,
         min_count=min_count,
-        patch_size=reported_patch_size,
+        reliable=reliable,
+        region_size=reported_region_size,
+        resampling_reliable=resampling_reliable,
     )
 
 
@@ -301,7 +312,7 @@ def structure_function_from_table(
     frame: str = "icrs",
     n_point: Literal[2, 3] = 2,
     bins: int | u.Quantity = 10,
-    patches: int = 64,
+    regions: int = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
     pos_errors: PositionErrors | None = None,
     stencil: StencilOptions | None = None,
@@ -331,7 +342,7 @@ def structure_function_from_table(
         coords=coords,
         n_point=n_point,
         bins=bins,
-        patches=patches,
+        regions=regions,
         error_method=error_method,
         pos_errors=pos_errors,
         stencil=stencil,
@@ -340,13 +351,13 @@ def structure_function_from_table(
 
 
 def _position_covariance(
-    pos_errors: PositionErrors | None, pos: _units.Positions
+    pos_errors: PositionErrors | None, pos: units.Positions
 ) -> tuple[FloatArray, FloatArray]:
     """Per-source positional covariance and its largest eigenvalue."""
     n_sources = pos.xyz.shape[0]
     if pos_errors is None:
         return np.zeros((n_sources, 3)), np.zeros(n_sources)
-    var_east, var_north, cov = _units.position_covariance(pos_errors, pos)
+    var_east, var_north, cov = units.position_covariance(pos_errors, pos)
     half_sum = 0.5 * (var_east + var_north)
     largest = half_sum + np.sqrt((0.5 * (var_east - var_north)) ** 2 + cov**2)
     return np.column_stack((var_east, var_north, cov)), largest
@@ -354,8 +365,8 @@ def _position_covariance(
 
 def _sources_in_tree_order(
     tree: Tree,
-    pos: _units.Positions,
-    vals: _units.Values,
+    pos: units.Positions,
+    vals: units.Values,
     error_var: FloatArray,
     labels: IntArray,
     position_cov: FloatArray,
@@ -383,7 +394,7 @@ def _three_point(
     edges: FloatArray,
     stencil: StencilOptions,
     use_position_errors: bool,
-    n_patch: int,
+    n_regions: int,
     acc: FloatArray,
 ) -> FloatArray:
     angle_tol = math.radians(stencil.angle_tol_deg)
@@ -405,17 +416,17 @@ def _three_point(
         np.sqrt(ring_edges[:-1] * ring_edges[1:]),
         2 * math.ceil(2.0 * math.pi / angle_tol),
     )
-    return binned_triplets(tree.nodes, tree.roots, sources, edges, grid, n_patch, acc)
+    return binned_triplets(tree.nodes, tree.roots, sources, edges, grid, n_regions, acc)
 
 
 def _edges(
     bins: int | u.Quantity,
     min_sep: u.Quantity | None,
     max_sep: u.Quantity | None,
-    pos: _units.Positions,
+    pos: units.Positions,
 ) -> FloatArray:
     if isinstance(bins, u.Quantity) or np.ndim(bins) > 0:
-        edges = _units.separation_array(bins, pos)
+        edges = units.separation_array(bins, pos)
         if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):
             msg = "bin edges must be a strictly increasing 1D array"
             raise ValueError(msg)
@@ -426,8 +437,8 @@ def _edges(
         raise ValueError(msg)
     if min_sep is None or max_sep is None:
         smin, smax = separation_range(pos.xyz, pos.angular)
-    smin = smin if min_sep is None else _units.separation_value(min_sep, pos)
-    smax = smax if max_sep is None else _units.separation_value(max_sep, pos)
+    smin = smin if min_sep is None else units.separation_value(min_sep, pos)
+    smax = smax if max_sep is None else units.separation_value(max_sep, pos)
     return log_edges(smin, smax, n_bins)
 
 
@@ -451,22 +462,22 @@ def _ring_edges(edges: FloatArray, sep_tol: float) -> tuple[FloatArray, IntArray
 
 def _check_resampling(
     method: ErrorMethod,
-    n_patch: int,
+    n_regions: int,
     n_bins: int,
     edges: FloatArray,
-    patch_size: float,
+    region_size: float,
 ) -> None:
     if method == ErrorMethod.NONE:
         return
-    if n_patch < 3 * n_bins:
+    if n_regions < 3 * n_bins:
         warnings.warn(
-            f"{n_patch} patches for {n_bins} bins: the covariance will be noisy "
-            "and possibly singular (aim for n_patch >= 3 * n_bins)",
+            f"{n_regions} regions for {n_bins} bins: the covariance will be noisy "
+            "and possibly singular (aim for n_regions >= 3 * n_bins)",
             StructureFunctionWarning,
             stacklevel=3,
         )
-    if edges[-1] > patch_size:
+    if edges[-1] > region_size:
         logger.info(
-            "Bins beyond the typical patch size have underestimated errors; "
+            "Bins beyond the typical region size have underestimated errors; "
             "see SFResult.resampling_reliable"
         )

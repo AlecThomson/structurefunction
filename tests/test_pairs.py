@@ -26,7 +26,7 @@ def run(cat: Catalogue, tol: float = 0.0) -> SFResult[FloatArray]:
         bins=EDGES,
         weights=cat.weights,
         bin_tolerance=tol,
-        patches=8,
+        regions=8,
         rng=0,
     )
 
@@ -69,7 +69,7 @@ def test_frame_independent(small: Catalogue) -> None:
         bins=EDGES,
         weights=small.weights,
         bin_tolerance=0.0,
-        patches=8,
+        regions=8,
         rng=0,
     )
     np.testing.assert_allclose(res.sf, icrs.sf, rtol=1e-9)
@@ -85,7 +85,7 @@ def test_units_round_trip(small: Catalogue) -> None:
         bins=EDGES,
         weights=small.weights,
         bin_tolerance=0.0,
-        patches=8,
+        regions=8,
         rng=0,
     )
     assert res.sf.unit == unit**2
@@ -102,7 +102,7 @@ def test_white_noise_saturates_at_two_variance() -> None:
     n = 4000
     c = SkyCoord(rng.uniform(0, 20, n) * u.deg, rng.uniform(-10, 10, n) * u.deg)
     f = rng.normal(0, 2.0, n)
-    res = structure_function(f, None, c, bins=6, patches=32, rng=1)
+    res = structure_function(f, None, c, bins=6, regions=32, rng=1)
     assert np.all(np.abs(res.sf - 2 * np.var(f)) < 4 * res.sf_err)
     np.testing.assert_allclose(res.saturation, 2 * np.var(f), rtol=1e-12)
 
@@ -113,7 +113,7 @@ def test_noise_is_debiased() -> None:
     c = SkyCoord(rng.uniform(0, 20, n) * u.deg, rng.uniform(-10, 10, n) * u.deg)
     sigma = rng.uniform(0.5, 1.5, n)
     f = rng.normal(0, sigma)
-    res = structure_function(f, sigma, c, bins=5, patches=40, rng=1)
+    res = structure_function(f, sigma, c, bins=5, regions=40, rng=1)
     assert np.all(np.abs(res.sf) < 4 * res.sf_err)
 
 
@@ -127,7 +127,7 @@ def test_distances_give_3d_separations() -> None:
     )
     f = rng.normal(size=n)
     edges = np.geomspace(5, 150, 6) * u.pc
-    res = structure_function(f, None, c, bins=edges, patches=4, bin_tolerance=0.0)
+    res = structure_function(f, None, c, bins=edges, regions=4, bin_tolerance=0.0)
     i, j = np.triu_indices(n, 1)
     d = c[i].separation_3d(c[j]).to_value(u.pc)
     cnt, _ = np.histogram(d, edges.to_value(u.pc))

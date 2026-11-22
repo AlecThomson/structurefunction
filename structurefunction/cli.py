@@ -12,11 +12,13 @@ from pathlib import Path
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
+from capn_crunch import add_options_to_parser, create_options_from_parser
 
 from structurefunction.core import structure_function_from_table
+from structurefunction.io import write
 from structurefunction.options import StencilOptions
 from structurefunction.skymap import structure_function_skymap
-from structurefunction.types import ErrorMethod, FitModel, StencilMode, Taper
+from structurefunction.types import ErrorMethod, FitModel, Taper
 
 
 def _add_common(parser: ArgumentParser) -> None:
@@ -32,11 +34,9 @@ def _add_common(parser: ArgumentParser) -> None:
     )
     parser.add_argument("--frame", default="icrs", help="Frame of lon/lat")
     parser.add_argument("--n-point", type=int, choices=(2, 3), default=2)
-    parser.add_argument(
-        "--stencil-mode", choices=[m.value for m in StencilMode], default="binned"
-    )
-    parser.add_argument("--angle-tol-deg", type=float, default=10.0)
-    parser.add_argument("--sep-tol", type=float, default=0.1)
+    # Three-point stencil flags (--angle-tol-deg, --sep-tol, --mode) come from
+    # the StencilOptions fields and their docstrings.
+    add_options_to_parser(parser, StencilOptions)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
         "--plot", type=Path, default=None, help="Save a quick-look plot"
@@ -53,7 +53,7 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     sf = sub.add_parser("sf", help="One structure function for the whole table")
     _add_common(sf)
     sf.add_argument("--bins", type=int, default=10, help="Number of log bins")
-    sf.add_argument("--patches", type=int, default=64)
+    sf.add_argument("--regions", type=int, default=64)
     sf.add_argument(
         "--error-method", choices=[m.value for m in ErrorMethod], default="jackknife"
     )
@@ -70,7 +70,7 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     sky.add_argument("--bins", type=int, default=8)
     sky.add_argument("--min-sep-deg", type=float, default=None)
     sky.add_argument("--max-sep-deg", type=float, default=None)
-    sky.add_argument("--patches", type=int, default=16, help="Patches per cell")
+    sky.add_argument("--regions", type=int, default=16, help="Regions per cell")
     sky.add_argument("--min-sources", type=float, default=30.0)
     sky.add_argument(
         "--fit-model",
@@ -91,7 +91,7 @@ def cli(args: Namespace | None = None) -> None:
     if args is None:
         args = get_parser().parse_args()
     table = Table.read(args.table)
-    stencil = StencilOptions(args.angle_tol_deg, args.sep_tol, args.stencil_mode)
+    stencil = create_options_from_parser(args, StencilOptions)
     if args.command == "sf":
         res = structure_function_from_table(
             table=table,
@@ -102,12 +102,12 @@ def cli(args: Namespace | None = None) -> None:
             frame=args.frame,
             n_point=args.n_point,
             bins=args.bins,
-            patches=args.patches,
+            regions=args.regions,
             error_method=args.error_method,
             stencil=stencil,
             rng=args.seed,
         )
-        res.write(args.output, overwrite=args.overwrite)
+        write(res, args.output, overwrite=args.overwrite)
         if args.plot is not None:
             from structurefunction.plotting import plot_sf
 
@@ -129,13 +129,13 @@ def cli(args: Namespace | None = None) -> None:
         max_sep=None if args.max_sep_deg is None else args.max_sep_deg * u.deg,
         taper=args.taper,
         n_point=args.n_point,
-        patches=args.patches,
+        regions=args.regions,
         min_sources=args.min_sources,
         fit_model=None if args.fit_model == "none" else args.fit_model,
         stencil=stencil,
         rng=args.seed,
     )
-    sky.write(args.output, overwrite=args.overwrite)
+    write(sky, args.output, overwrite=args.overwrite)
     if args.plot is not None:
         from structurefunction.plotting import plot_skymap
 
