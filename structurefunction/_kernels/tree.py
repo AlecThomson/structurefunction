@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
+
+# Exported at runtime but missing from numba's type information.
+from numba import get_thread_id  # type: ignore[attr-defined]
 
 from structurefunction._kernels.brute import pair_into
 from structurefunction._kernels.common import (
@@ -27,7 +31,9 @@ from structurefunction._kernels.common import (
     find_bin,
     norm_cdf,
 )
-from structurefunction.types import FloatArray, IntArray
+
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +63,7 @@ class Tree:
     patch: IntArray
 
 
-def build_tree(  # noqa: PLR0913
+def build_tree(
     xyz: FloatArray,
     f: FloatArray,
     sig2: FloatArray,
@@ -75,18 +81,31 @@ def build_tree(  # noqa: PLR0913
     by_patch = np.argsort(patch, kind="stable").astype(np.intp)
     bounds = np.searchsorted(patch[by_patch], np.arange(n_patch + 1)).astype(np.intp)
     arrays = _build(
-        xyz[by_patch], f[by_patch], sig2[by_patch], w[by_patch],
-        pos_var_major[by_patch], bounds, leaf_size,
-    )  # fmt: skip
+        xyz[by_patch],
+        f[by_patch],
+        sig2[by_patch],
+        w[by_patch],
+        pos_var_major[by_patch],
+        bounds,
+        leaf_size,
+    )
     start, end, left, right, centre, radius, moments, roots, node_patch, perm = arrays
     return Tree(
-        order=by_patch[perm], roots=roots, start=start, end=end, left=left, right=right,
-        centre=centre, radius=radius, moments=moments, patch=node_patch,
-    )  # fmt: skip
+        order=by_patch[perm],
+        roots=roots,
+        start=start,
+        end=end,
+        left=left,
+        right=right,
+        centre=centre,
+        radius=radius,
+        moments=moments,
+        patch=node_patch,
+    )
 
 
 @numba.njit(cache=True)
-def _build(  # noqa: PLR0913, PLR0915, C901
+def _build(
     xyz: FloatArray,
     f: FloatArray,
     sig2: FloatArray,
@@ -95,9 +114,17 @@ def _build(  # noqa: PLR0913, PLR0915, C901
     bounds: IntArray,
     leaf_size: int,
 ) -> tuple[
-    IntArray, IntArray, IntArray, IntArray, FloatArray, FloatArray, FloatArray,
-    IntArray, IntArray, IntArray,
-]:  # fmt: skip
+    IntArray,
+    IntArray,
+    IntArray,
+    IntArray,
+    FloatArray,
+    FloatArray,
+    FloatArray,
+    IntArray,
+    IntArray,
+    IntArray,
+]:
     """Median-split construction; returns node arrays and the tree-order permutation."""
     n = xyz.shape[0]
     n_patch = bounds.size - 1
@@ -200,13 +227,21 @@ def _build(  # noqa: PLR0913, PLR0915, C901
         moments[node, 4] = e - s
         moments[node, 5] = vmax
     return (
-        start[:n_node], end[:n_node], left[:n_node], right[:n_node], centre,
-        radius, moments, roots, node_patch[:n_node], perm,
-    )  # fmt: skip
+        start[:n_node],
+        end[:n_node],
+        left[:n_node],
+        right[:n_node],
+        centre,
+        radius,
+        moments,
+        roots,
+        node_patch[:n_node],
+        perm,
+    )
 
 
 @numba.njit(cache=True)
-def _node_pair(  # noqa: PLR0913
+def _node_pair(
     acc: FloatArray,
     slot: int,
     b: int,
@@ -225,13 +260,21 @@ def _node_pair(  # noqa: PLR0913
     bias = wb * ma[3] + wa * mb[3]
     ww = wa * wb
     add_pair(
-        acc, slot, b, pa, pb, frac * ww, frac * wd, frac * bias, frac * ww * sep,
+        acc,
+        slot,
+        b,
+        pa,
+        pb,
+        frac * ww,
+        frac * wd,
+        frac * bias,
+        frac * ww * sep,
         frac * ma[4] * mb[4],
-    )  # fmt: skip
+    )
 
 
 @numba.njit(cache=True)
-def _accept_block(  # noqa: PLR0913
+def _accept_block(
     acc: FloatArray,
     slot: int,
     sep: float,
@@ -261,7 +304,7 @@ def _accept_block(  # noqa: PLR0913
 
 
 @numba.njit(cache=True, parallel=True)
-def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
+def dual_tree_pairs(
     start: IntArray,
     end: IntArray,
     left: IntArray,
@@ -278,12 +321,12 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
     patch: IntArray,
     edges: FloatArray,
     acc: FloatArray,
-    angular: bool,  # noqa: FBT001
+    angular: bool,
     bin_tolerance: float,
     east: FloatArray,
     north: FloatArray,
     pcov: FloatArray,
-    use_pos: bool,  # noqa: FBT001
+    use_pos: bool,
 ) -> FloatArray:
     """Dual-tree two-point accumulation over all patch-root pairs.
 
@@ -304,11 +347,10 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
             task_a[t] = roots[live[ia]]
             task_b[t] = roots[live[ib]]
             t += 1
-    n_slots = acc.shape[0]
     s_lo = edges[0]
     s_hi = edges[-1]
     for t in numba.prange(n_tasks):
-        slot = numba.get_thread_id()
+        slot = get_thread_id()
         stack = np.empty((256, 2), np.intp)
         top = 0
         stack[0, 0] = task_a[t]
@@ -327,9 +369,22 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
                     for i in range(start[a], end[a]):
                         for j in range(i + 1, end[a]):
                             pair_into(
-                                acc, slot, i, j, xyz, f, sig2, w, patch, edges,
-                                angular, east, north, pcov, use_pos,
-                            )  # fmt: skip
+                                acc,
+                                slot,
+                                i,
+                                j,
+                                xyz,
+                                f,
+                                sig2,
+                                w,
+                                patch,
+                                edges,
+                                angular,
+                                east,
+                                north,
+                                pcov,
+                                use_pos,
+                            )
                 else:
                     stack[top, 0] = left[a]
                     stack[top, 1] = left[a]
@@ -357,9 +412,16 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
             kmax = find_bin(smax + pad, edges)
             if kmin >= 0 and kmin == kmax:
                 _accept_block(
-                    acc, slot, sep_c, 0.0, edges, moments[a], moments[b],
-                    node_patch[a], node_patch[b],
-                )  # fmt: skip
+                    acc,
+                    slot,
+                    sep_c,
+                    0.0,
+                    edges,
+                    moments[a],
+                    moments[b],
+                    node_patch[a],
+                    node_patch[b],
+                )
                 continue
             if bin_tolerance > 0.0:
                 kc = find_bin(sep_c, edges)
@@ -370,9 +432,16 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
                     if use_pos:
                         sigma = math.sqrt(moments[a, 5] + moments[b, 5])
                     _accept_block(
-                        acc, slot, sep_c, sigma, edges, moments[a], moments[b],
-                        node_patch[a], node_patch[b],
-                    )  # fmt: skip
+                        acc,
+                        slot,
+                        sep_c,
+                        sigma,
+                        edges,
+                        moments[a],
+                        moments[b],
+                        node_patch[a],
+                        node_patch[b],
+                    )
                     continue
             a_leaf = left[a] < 0
             b_leaf = left[b] < 0
@@ -380,9 +449,22 @@ def dual_tree_pairs(  # noqa: PLR0913, PLR0915, C901
                 for i in range(start[a], end[a]):
                     for j in range(start[b], end[b]):
                         pair_into(
-                            acc, slot, i, j, xyz, f, sig2, w, patch, edges,
-                            angular, east, north, pcov, use_pos,
-                        )  # fmt: skip
+                            acc,
+                            slot,
+                            i,
+                            j,
+                            xyz,
+                            f,
+                            sig2,
+                            w,
+                            patch,
+                            edges,
+                            angular,
+                            east,
+                            north,
+                            pcov,
+                            use_pos,
+                        )
                 continue
             if b_leaf or (not a_leaf and radius[a] >= radius[b]):
                 stack[top, 0] = left[a]

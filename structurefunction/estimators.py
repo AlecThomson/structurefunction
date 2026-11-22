@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from structurefunction._kernels.common import Kind, Stat
-from structurefunction.types import CrossPatchWeight, ErrorMethod
+from structurefunction.typedefs import CrossPatchWeight, ErrorMethod
 
 if TYPE_CHECKING:
-    from structurefunction.types import FloatArray
+    from structurefunction.typedefs import FloatArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +43,7 @@ def _sf_from_totals(tot: FloatArray) -> tuple[FloatArray, FloatArray]:
     return sf, bias
 
 
-def estimate(  # noqa: PLR0913
+def estimate(
     acc: FloatArray,
     error_method: ErrorMethod,
     cross_patch_weight: CrossPatchWeight,
@@ -78,19 +78,24 @@ def estimate(  # noqa: PLR0913
         removed = acc[Kind.AUTO] + alpha * acc[Kind.CROSS]  # (bin, patch, stat)
         loo = total[:, None, :] - removed  # (bin, patch, stat)
         samples, _ = _sf_from_totals(np.moveaxis(loo, 1, 0))  # (patch, bin)
-        mean = np.nanmean(samples, axis=0)
+        mean = _nanmean(samples)
         resid = samples - mean
         cov = (n_patch - 1) / n_patch * _nan_outer_sum(resid)
     elif error_method == ErrorMethod.BOOTSTRAP and n_patch > 1:
         counts = rng.multinomial(n_patch, np.full(n_patch, 1.0 / n_patch), n_boot)
         boot = np.einsum("sp,bpk->sbk", counts.astype(np.float64), mark)
         samples, _ = _sf_from_totals(boot)
-        mean = np.nanmean(samples, axis=0)
+        mean = _nanmean(samples)
         cov = _nan_outer_sum(samples - mean) / (n_boot - 1)
     return Estimate(
-        sf=sf, noise_bias=bias, separation=sep, count=count, weight=w, cov=cov,
+        sf=sf,
+        noise_bias=bias,
+        separation=sep,
+        count=count,
+        weight=w,
+        cov=cov,
         samples=samples,
-    )  # fmt: skip
+    )
 
 
 def _nan_outer_sum(resid: FloatArray) -> FloatArray:
@@ -103,3 +108,12 @@ def _nan_outer_sum(resid: FloatArray) -> FloatArray:
     out[~seen, :] = np.nan
     out[:, ~seen] = np.nan
     return out
+
+
+def _nanmean(samples: FloatArray) -> FloatArray:
+    """Mean over samples, NaN (without a warning) for never-populated bins."""
+    finite = np.isfinite(samples)
+    n = finite.sum(axis=0)
+    total = np.where(finite, samples, 0.0).sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(n > 0, total / np.maximum(n, 1), np.nan)

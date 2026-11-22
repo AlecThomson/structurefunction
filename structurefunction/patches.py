@@ -11,7 +11,7 @@ from scipy.cluster.vq import kmeans2
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
-    from structurefunction.types import FloatArray, IntArray
+    from structurefunction.typedefs import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)

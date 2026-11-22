@@ -9,7 +9,7 @@ import astropy.units as u
 import numpy as np
 from astropy.table import QTable, Table
 
-from structurefunction.types import ErrorMethod, FloatArray
+from structurefunction.typedefs import ErrorMethod, FloatArray
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +30,7 @@ class SFResult[V: (FloatArray, u.Quantity)]:
     noise_bias: V
     """Noise bias subtracted per bin, ``<sum_i c_i^2 sigma_i^2>``."""
     saturation: V
-    """Expected large-scale plateau for uncorrelated data, ``sum c^2 Var(f)``."""
+    """Large-scale plateau, ``sum c^2 (Var(f) - <sigma^2>)`` (noise removed)."""
     cov: FloatArray | None
     """Bin-to-bin covariance of ``sf`` (in ``unit**4``), or ``None``."""
     separation: u.Quantity
@@ -119,18 +119,35 @@ class SFResult[V: (FloatArray, u.Quantity)]:
         min_count = int(meta["min_count"])
         if unit is None:
             return SFResult[FloatArray](
-                sf=sf, sf_err=sf_err, noise_bias=bias, saturation=sat, cov=cov,
-                separation=sep, bin_edges=edges, count=count, weight=weight,
-                n_point=n_point, n_patch=n_patch, error_method=method,
+                sf=sf,
+                sf_err=sf_err,
+                noise_bias=bias,
+                saturation=sat,
+                cov=cov,
+                separation=sep,
+                bin_edges=edges,
+                count=count,
+                weight=weight,
+                n_point=n_point,
+                n_patch=n_patch,
+                error_method=method,
                 min_count=min_count,
-            )  # fmt: skip
+            )
         return SFResult[u.Quantity](
-            sf=u.Quantity(sf, unit), sf_err=u.Quantity(sf_err, unit),
-            noise_bias=u.Quantity(bias, unit), saturation=u.Quantity(sat, unit),
-            cov=cov, separation=sep, bin_edges=edges, count=count, weight=weight,
-            n_point=n_point, n_patch=n_patch, error_method=method,
+            sf=u.Quantity(sf, unit),
+            sf_err=u.Quantity(sf_err, unit),
+            noise_bias=u.Quantity(bias, unit),
+            saturation=u.Quantity(sat, unit),
+            cov=cov,
+            separation=sep,
+            bin_edges=edges,
+            count=count,
+            weight=weight,
+            n_point=n_point,
+            n_patch=n_patch,
+            error_method=method,
             min_count=min_count,
-        )  # fmt: skip
+        )
 
     @classmethod
     def read(cls, path: str | Path) -> SFResult[FloatArray] | SFResult[u.Quantity]:

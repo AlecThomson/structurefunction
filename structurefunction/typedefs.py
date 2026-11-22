@@ -102,3 +102,15 @@ class RAErrorConvention(StrEnum):
 
 
 type RAErrorConventionLike = RAErrorConvention | Literal["on_sky", "coordinate"]
+
+
+class Taper(StrEnum):
+    """Apodising window used to weight sources around a sky-map cell centre."""
+
+    COSINE = "cosine"
+    """``(1 + cos(pi d / R)) / 2`` for ``d < R``, zero beyond."""
+    GAUSSIAN = "gaussian"
+    """``exp(-d^2 / 2 s^2)`` with FWHM ``R``, truncated at ``3 s``."""
+
+
+type TaperLike = Taper | Literal["cosine", "gaussian"]

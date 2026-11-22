@@ -8,7 +8,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 if TYPE_CHECKING:
-    from structurefunction.types import FloatArray
+    from structurefunction.typedefs import FloatArray
 
 
 def tangent_basis(lon: FloatArray, lat: FloatArray) -> tuple[FloatArray, FloatArray]:

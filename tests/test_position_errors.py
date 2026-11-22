@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
-from conftest import make_catalogue
 
 from structurefunction import (
     AxisPositionErrors,
@@ -18,8 +17,12 @@ from structurefunction._kernels.brute import brute_pairs
 from structurefunction._kernels.common import new_accumulator
 from structurefunction._units import position_covariance, positions
 from structurefunction.geometry import tangent_basis
-from structurefunction.options import PositionErrors
-from structurefunction.types import FloatArray
+
+from conftest import make_catalogue
+
+if TYPE_CHECKING:
+    from structurefunction.options import PositionErrors
+    from structurefunction.typedefs import FloatArray
 
 EDGES = np.geomspace(0.05, 2.0, 7) * u.deg
 
@@ -32,10 +35,16 @@ def run(
 ) -> SFResult[FloatArray]:
     cat = make_catalogue(400, seed=cat_seed, size_deg=4.0)
     return structure_function(
-        cat.values, cat.errors, cat.coords, n_point=n_point, bins=EDGES,
-        patches=4, bin_tolerance=tol, pos_errors=pos,
+        cat.values,
+        cat.errors,
+        cat.coords,
+        n_point=n_point,
+        bins=EDGES,
+        patches=4,
+        bin_tolerance=tol,
+        pos_errors=pos,
         stencil=StencilOptions(mode="exact"),
-    )  # fmt: skip
+    )
 
 
 def test_zero_errors_match_no_errors() -> None:
@@ -60,9 +69,15 @@ def test_ra_conventions_and_time_units_agree() -> None:
 
     def go(err: AxisPositionErrors) -> SFResult[FloatArray]:
         return structure_function(
-            cat.values, None, c, bins=EDGES, patches=1, error_method="none",
-            pos_errors=err, bin_tolerance=0.0,
-        )  # fmt: skip
+            cat.values,
+            None,
+            c,
+            bins=EDGES,
+            patches=1,
+            error_method="none",
+            pos_errors=err,
+            bin_tolerance=0.0,
+        )
 
     a = go(AxisPositionErrors(on_sky, 10 * u.arcsec, "on_sky"))
     b = go(AxisPositionErrors(coord, 10 * u.arcsec, "coordinate"))
@@ -75,17 +90,32 @@ def test_tree_matches_brute_with_errors() -> None:
     cat = make_catalogue(400, seed=4, size_deg=4.0)
     err = CircularPositionError(2 * u.arcmin)
     tree = structure_function(
-        cat.values, cat.errors, cat.coords, bins=EDGES, patches=1,
-        error_method="none", bin_tolerance=0.0, pos_errors=err,
-    )  # fmt: skip
+        cat.values,
+        cat.errors,
+        cat.coords,
+        bins=EDGES,
+        patches=1,
+        error_method="none",
+        bin_tolerance=0.0,
+        pos_errors=err,
+    )
     pos = positions(cat.coords)
     east, north = tangent_basis(pos.lon, pos.lat)
     pcov = np.column_stack(position_covariance(err, pos))
     acc = brute_pairs(
-        pos.xyz, cat.values, cat.errors**2, np.ones_like(cat.values),
-        np.zeros(cat.values.size, np.intp), EDGES.to_value(u.rad),
-        new_accumulator(2, EDGES.size - 1, 1), True, east, north, pcov, True,  # noqa: FBT003
-    )  # fmt: skip
+        pos.xyz,
+        cat.values,
+        cat.errors**2,
+        np.ones_like(cat.values),
+        np.zeros(cat.values.size, np.intp),
+        EDGES.to_value(u.rad),
+        new_accumulator(2, EDGES.size - 1, 1),
+        angular=True,
+        east=east,
+        north=north,
+        pcov=pcov,
+        use_pos=True,
+    )
     w = acc[2, :, 0, 0]
     sf = (acc[2, :, 0, 1] - acc[2, :, 0, 2]) / w
     np.testing.assert_allclose(tree.sf, sf, rtol=1e-10)
@@ -98,9 +128,15 @@ def test_soft_binning_matches_monte_carlo_jitter() -> None:
     # The Gaussian approximation needs sigma_sep << separation.
     sigma = 1 * u.arcmin
     soft = structure_function(
-        cat.values, None, cat.coords, bins=EDGES, patches=1, error_method="none",
-        pos_errors=CircularPositionError(sigma), bin_tolerance=0.0,
-    )  # fmt: skip
+        cat.values,
+        None,
+        cat.coords,
+        bins=EDGES,
+        patches=1,
+        error_method="none",
+        pos_errors=CircularPositionError(sigma),
+        bin_tolerance=0.0,
+    )
     counts = []
     for _ in range(200):
         dl = rng.normal(0, sigma.to_value(u.deg), cat.lon.size)
@@ -110,9 +146,14 @@ def test_soft_binning_matches_monte_carlo_jitter() -> None:
             (cat.lat + db) * u.deg,
         )
         r = structure_function(
-            cat.values, None, c, bins=EDGES, patches=1, error_method="none",
+            cat.values,
+            None,
+            c,
+            bins=EDGES,
+            patches=1,
+            error_method="none",
             bin_tolerance=0.0,
-        )  # fmt: skip
+        )
         counts.append(r.count)
     mc = np.mean(counts, axis=0)
     np.testing.assert_allclose(soft.count, mc, rtol=0.03)

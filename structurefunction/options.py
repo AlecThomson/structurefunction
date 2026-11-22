@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from structurefunction.types import (
+from structurefunction.typedefs import (
     RAErrorConvention,
     RAErrorConventionLike,
     StencilMode,
@@ -79,9 +79,7 @@ class AxisPositionErrors:
 
     def __post_init__(self) -> None:
         """Normalise the RA convention."""
-        object.__setattr__(
-            self, "ra_convention", RAErrorConvention(self.ra_convention)
-        )
+        object.__setattr__(self, "ra_convention", RAErrorConvention(self.ra_convention))
 
     @classmethod
     def from_table(

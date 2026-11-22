@@ -8,7 +8,7 @@ units (``u.deg`` etc.) in one place.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 import astropy.units as u
 import numpy as np
@@ -19,12 +19,12 @@ from structurefunction.options import (
     CircularPositionError,
     PositionErrors,
 )
-from structurefunction.types import RAErrorConvention
+from structurefunction.typedefs import RAErrorConvention
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
-    from structurefunction.types import FloatArray
+    from structurefunction.typedefs import FloatArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +184,6 @@ def position_covariance(
 
     Raises:
         NotImplementedError: For coordinates with distances.
-        TypeError: For an unknown error container.
     """
     if not pos.angular:
         msg = "positional errors are only supported for angular (2D sky) data"
@@ -196,7 +195,7 @@ def position_covariance(
         )
         var = s**2
         return var.copy(), var.copy(), np.zeros(n)
-    if isinstance(pos_errors, AxisPositionErrors):
+    if isinstance(pos_errors, AxisPositionErrors):  # pragma: no branch
         ra = pos_errors.sigma_ra
         # Time units of RA (h, min, s) convert to angle at 15 deg per hour.
         if ra.unit.physical_type == "time":
@@ -211,5 +210,4 @@ def position_covariance(
         ).astype(np.float64)
         rho = 0.0 if pos_errors.corr is None else pos_errors.corr
         return ra_rad**2, dec_rad**2, rho * ra_rad * dec_rad
-    msg = f"unknown positional error type {type(pos_errors).__name__}"
-    raise TypeError(msg)
+    assert_never(pos_errors)

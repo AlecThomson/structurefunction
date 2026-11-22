@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from structurefunction._version import version as __version__
 from structurefunction.core import structure_function, structure_function_from_table
-from structurefunction.logging import StructureFunctionWarning
+from structurefunction.log import StructureFunctionWarning
 from structurefunction.options import (
     AxisPositionErrors,
     CircularPositionError,
     StencilOptions,
 )
 from structurefunction.results import SFResult
-from structurefunction.types import (
+from structurefunction.skymap import SkyMapResult, structure_function_skymap
+from structurefunction.typedefs import (
     CrossPatchWeight,
     ErrorMethod,
     FitModel,
@@ -19,6 +20,7 @@ from structurefunction.types import (
     RAErrorConvention,
     Sampler,
     StencilMode,
+    Taper,
 )
 
 __all__ = [
@@ -31,10 +33,13 @@ __all__ = [
     "RAErrorConvention",
     "SFResult",
     "Sampler",
+    "SkyMapResult",
     "StencilMode",
     "StencilOptions",
     "StructureFunctionWarning",
+    "Taper",
     "__version__",
     "structure_function",
     "structure_function_from_table",
+    "structure_function_skymap",
 ]

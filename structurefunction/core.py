@@ -22,11 +22,11 @@ from structurefunction.geometry import (
     separation_range,
     tangent_basis,
 )
-from structurefunction.logging import StructureFunctionWarning, logger
+from structurefunction.log import StructureFunctionWarning, logger
 from structurefunction.options import StencilOptions
 from structurefunction.patches import make_patches
 from structurefunction.results import SFResult
-from structurefunction.types import (
+from structurefunction.typedefs import (
     CrossPatchWeight,
     CrossPatchWeightLike,
     ErrorMethod,
@@ -86,6 +86,28 @@ def structure_function(
     min_count: int = 10,
     rng: np.random.Generator | int | None = None,
 ) -> SFResult[FloatArray]: ...
+
+
+@overload
+def structure_function(
+    values: ArrayLike | u.Quantity,
+    errors: ArrayLike | u.Quantity | None,
+    coords: SkyCoord,
+    n_point: Literal[2, 3] = 2,
+    bins: int | u.Quantity = 10,
+    min_sep: u.Quantity | None = None,
+    max_sep: u.Quantity | None = None,
+    weights: ArrayLike | None = None,
+    patches: int | ArrayLike = 64,
+    error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
+    cross_patch_weight: CrossPatchWeightLike = CrossPatchWeight.SIMPLE,
+    n_boot: int = 1000,
+    bin_tolerance: float = 0.05,
+    pos_errors: PositionErrors | None = None,
+    stencil: StencilOptions | None = None,
+    min_count: int = 10,
+    rng: np.random.Generator | int | None = None,
+) -> SFResult[u.Quantity] | SFResult[FloatArray]: ...
 
 
 def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
@@ -191,27 +213,62 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
     acc = new_accumulator(numba.get_num_threads(), n_bins, patch_info.n_patch)
     logger.info(
         "Computing %d-point SF: %d sources, %d bins, %d patches",
-        n_point, n, n_bins, patch_info.n_patch,
-    )  # fmt: skip
+        n_point,
+        n,
+        n_bins,
+        patch_info.n_patch,
+    )
     if n_point == 2:  # noqa: PLR2004
         summed = dual_tree_pairs(
-            tree.start, tree.end, tree.left, tree.right, tree.centre,
-            tree.radius, tree.moments, tree.patch, tree.roots, pos.xyz[o],
-            vals.values[o], sig2[o], vals.weights[o], labels[o], edges, acc,
-            pos.angular, bin_tolerance, east[o], north[o], pcov[o], use_pos,
-        )  # fmt: skip
+            tree.start,
+            tree.end,
+            tree.left,
+            tree.right,
+            tree.centre,
+            tree.radius,
+            tree.moments,
+            tree.patch,
+            tree.roots,
+            pos.xyz[o],
+            vals.values[o],
+            sig2[o],
+            vals.weights[o],
+            labels[o],
+            edges,
+            acc,
+            pos.angular,
+            bin_tolerance,
+            east[o],
+            north[o],
+            pcov[o],
+            use_pos,
+        )
         coeff_sq = 2.0
     else:
         coeff_sq = 6.0
         mode = StencilMode(stencil.mode)
         if mode == StencilMode.EXACT:
             summed = exact_triplets(
-                tree.start, tree.end, tree.left, tree.centre, tree.radius,
-                tree.roots, pos.xyz[o], vals.values[o], sig2[o],
-                vals.weights[o], labels[o], edges, acc,
-                math.radians(stencil.angle_tol_deg), stencil.sep_tol,
-                east[o], north[o], pcov[o], use_pos,
-            )  # fmt: skip
+                tree.start,
+                tree.end,
+                tree.left,
+                tree.centre,
+                tree.radius,
+                tree.roots,
+                pos.xyz[o],
+                vals.values[o],
+                sig2[o],
+                vals.weights[o],
+                labels[o],
+                edges,
+                acc,
+                math.radians(stencil.angle_tol_deg),
+                stencil.sep_tol,
+                east[o],
+                north[o],
+                pcov[o],
+                use_pos,
+            )
         else:
             if use_pos:
                 msg = (
@@ -222,19 +279,36 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
             sub_edges, sub_to_bin = _sub_edges(edges, stencil.sep_tol)
             n_sector = 2 * math.ceil(math.pi / math.radians(stencil.angle_tol_deg))
             summed = binned_triplets(
-                tree.start, tree.end, tree.left, tree.centre, tree.radius,
-                tree.moments, tree.patch, tree.roots, pos.xyz[o],
-                vals.values[o], sig2[o], vals.weights[o], labels[o], edges,
-                sub_edges, sub_to_bin, n_sector, patch_info.n_patch, acc,
-                east[o], north[o],
-            )  # fmt: skip
+                tree.start,
+                tree.end,
+                tree.left,
+                tree.centre,
+                tree.radius,
+                tree.moments,
+                tree.patch,
+                tree.roots,
+                pos.xyz[o],
+                vals.values[o],
+                sig2[o],
+                vals.weights[o],
+                labels[o],
+                sub_edges,
+                sub_to_bin,
+                n_sector,
+                patch_info.n_patch,
+                acc,
+                east[o],
+                north[o],
+            )
 
     est = estimate(summed, method, cpw, n_boot, gen)
     _check_resampling(method, patch_info.n_patch, n_bins, edges, patch_info.size, pos)
 
     wsum = vals.weights.sum()
     mu = np.sum(vals.weights * vals.values) / wsum
+    # Intrinsic variance: the debiased SF plateaus at sum(c^2) * (Var - <sigma^2>).
     var = np.sum(vals.weights * (vals.values - mu) ** 2) / wsum
+    var -= np.sum(vals.weights * sig2) / wsum
     sf_err = (
         np.sqrt(np.diag(est.cov)) if est.cov is not None else np.full(n_bins, np.nan)
     )
@@ -244,21 +318,36 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
     unit = vals.unit
     if unit is None:
         return SFResult[FloatArray](
-            sf=est.sf, sf_err=sf_err, noise_bias=est.noise_bias,
-            saturation=np.asarray(coeff_sq * var), cov=est.cov,
-            separation=sep_q, bin_edges=edges_q, count=est.count,
-            weight=est.weight, n_point=n_point, n_patch=patch_info.n_patch,
-            error_method=common_method, min_count=min_count,
-        )  # fmt: skip
+            sf=est.sf,
+            sf_err=sf_err,
+            noise_bias=est.noise_bias,
+            saturation=np.asarray(coeff_sq * var),
+            cov=est.cov,
+            separation=sep_q,
+            bin_edges=edges_q,
+            count=est.count,
+            weight=est.weight,
+            n_point=n_point,
+            n_patch=patch_info.n_patch,
+            error_method=common_method,
+            min_count=min_count,
+        )
     unit2 = unit**2
     return SFResult[u.Quantity](
-        sf=u.Quantity(est.sf, unit2), sf_err=u.Quantity(sf_err, unit2),
+        sf=u.Quantity(est.sf, unit2),
+        sf_err=u.Quantity(sf_err, unit2),
         noise_bias=u.Quantity(est.noise_bias, unit2),
-        saturation=u.Quantity(coeff_sq * var, unit2), cov=est.cov,
-        separation=sep_q, bin_edges=edges_q, count=est.count,
-        weight=est.weight, n_point=n_point, n_patch=patch_info.n_patch,
-        error_method=common_method, min_count=min_count,
-    )  # fmt: skip
+        saturation=u.Quantity(coeff_sq * var, unit2),
+        cov=est.cov,
+        separation=sep_q,
+        bin_edges=edges_q,
+        count=est.count,
+        weight=est.weight,
+        n_point=n_point,
+        n_patch=patch_info.n_patch,
+        error_method=common_method,
+        min_count=min_count,
+    )
 
 
 def structure_function_from_table(  # noqa: PLR0913
@@ -339,7 +428,9 @@ def _sub_edges(edges: FloatArray, sep_tol: float) -> tuple[FloatArray, IntArray]
     parts = []
     owner = []
     for k in range(edges.size - 1):
-        n_sub = max(1, math.ceil(math.log(edges[k + 1] / edges[k]) / math.log1p(sep_tol)))
+        n_sub = max(
+            1, math.ceil(math.log(edges[k + 1] / edges[k]) / math.log1p(sep_tol))
+        )
         sub = np.geomspace(edges[k], edges[k + 1], n_sub + 1)
         parts.append(sub[:-1])
         owner.extend([k] * n_sub)

@@ -134,6 +134,30 @@ wheels = [
 ]
 
 [[package]]
+name = "astropy-healpix"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "astropy" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/15/c1/aeb3fe3be2ee863708d625014267c71abfe20ddaa293b3d4ddb72ee1d6e9/astropy_healpix-2.0.1.tar.gz", hash = "sha256:0e3f1c94064c45da779900cb90c938df7aef99a924abb23eeb893b16540e77e6", size = 112256, upload-time = "2026-07-20T21:07:30.004Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/b0/c1e87188a088ea8a2a56e5fe56c183573f8d25851fedcbe7d6630717a5ff/astropy_healpix-2.0.1-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:218549b1a73c58953b00628da6c5db0f5fbfd7ebe65eb8e376150ac6d5f9a955", size = 86464, upload-time = "2026-07-20T21:07:13.755Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/7f/ec3ddbb15a681f1181412fe60cc1ad945a587110f4e5b9f1faadd41ea751/astropy_healpix-2.0.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:8528bd4040becee1b0d47a8b008b43ad007a47449860afe96f70cb2429d644f5", size = 83735, upload-time = "2026-07-20T21:07:15.215Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/3d/0cde0db89ac8dd4e5347322470530298915739f7e9b356b01c1939de8c4f/astropy_healpix-2.0.1-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:179119d5a69e7b9245919cbe04c3e6bf0a485516b36c29f3402951aad5452251", size = 191178, upload-time = "2026-07-20T21:07:16.512Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/c4/71cf2bd4374cc17e015413462be8051fe08bc49e077b7d48072fff4e465d/astropy_healpix-2.0.1-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c092c54124c48f8d98e04fb22f4b2aa4c8675e65d81c351523f41377f9a6df22", size = 193429, upload-time = "2026-07-20T21:07:18.015Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/5c/3a50f68225b836b395da4fb8dfd3d702ded1916042490b16a613caa0e4a6/astropy_healpix-2.0.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ce875a29c598c1a99f8f68351daeb4173463044dce4f1c7ebfe8c233ec5e9a49", size = 188694, upload-time = "2026-07-20T21:07:19.244Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/55/b0dcf0e79c78122572832bca8959c50cbdbd9571a979c67564edd65fa75d/astropy_healpix-2.0.1-cp310-abi3-win_amd64.whl", hash = "sha256:82a2d5d285076e44be7cb26e0435cf5a42eec4be79d893fd61b570c7440d9e99", size = 55344, upload-time = "2026-07-20T21:07:20.502Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/a6/6b339f6a6854754bd5556d29d599adff3a86bc8dfa6baa8828b213d2eded/astropy_healpix-2.0.1-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:9654beeec16a31fa038e64b3a3218d32b0a985299be7504725a46c647af59b42", size = 86655, upload-time = "2026-07-20T21:07:21.73Z" },
+    { url = "https://files.pythonhosted.org/packages/57/9e/32fec6c7fa57020132a246cb8e7e4dc77e14a696b71439eff95d4d23e98e/astropy_healpix-2.0.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:e5fd994d26d1bb2c3d4d5c8682d60353f15d6e0d5b967e6bbb2ec8181731743e", size = 84003, upload-time = "2026-07-20T21:07:23.202Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/a7/c369703ca3fc6f5bee31b3d1f6d0f0b38c15ec84e7fbb6f552c0c7cedfb2/astropy_healpix-2.0.1-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:78f76785852bcc748f5efab8bb4f2ab1fe959d7a998b48e7ed1e59a46cbf0e51", size = 198717, upload-time = "2026-07-20T21:07:24.657Z" },
+    { url = "https://files.pythonhosted.org/packages/32/d5/0c4183611b8f36877112882e25cc8a91655a2d11e120ea1f5c153cb7d3a0/astropy_healpix-2.0.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:02cefde735da1fe74654e786e02286261b04cc43f5c908a86a8457b2989ac2aa", size = 201205, upload-time = "2026-07-20T21:07:26.128Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/54/42bcd02b7c604d3a1132dfa93195bdc2677bb7844172cd098e149cbcb4e9/astropy_healpix-2.0.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:65bee7b70f35ddb81d6b6c849c5bf46768afbce6869395e4f9e0a5c27cb0ce17", size = 196134, upload-time = "2026-07-20T21:07:27.55Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/d0/b6b232d49c49fd6a329128034c297b690af84dc17f102fd4fb91ad9bc98a/astropy_healpix-2.0.1-cp314-cp314t-win_amd64.whl", hash = "sha256:0d63cac22a7b0896ef3e3d28aafcc1dfa3f8ac639d0ae6bf600d060062338107", size = 56366, upload-time = "2026-07-20T21:07:28.809Z" },
+]
+
+[[package]]
 name = "astropy-iers-data"
 version = "0.2026.11.16.0.37.44"
 source = { registry = "https://pypi.org/simple" }
@@ -2823,6 +2847,7 @@ name = "structurefunction"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },
+    { name = "astropy-healpix" },
     { name = "emcee" },
     { name = "numba" },
     { name = "numpy" },
@@ -2842,6 +2867,7 @@ plot = [
 dev = [
     { name = "matplotlib" },
     { name = "mypy" },
+    { name = "nautilus-sampler" },
     { name = "nbconvert" },
     { name = "nbformat" },
     { name = "prek" },
@@ -2878,6 +2904,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "astropy", specifier = ">=6" },
+    { name = "astropy-healpix", specifier = ">=1.1" },
     { name = "corner", marker = "extra == 'plot'", specifier = ">=2.2" },
     { name = "emcee", specifier = ">=3.1" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8" },
@@ -2892,6 +2919,7 @@ provides-extras = ["evidence", "plot"]
 dev = [
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mypy", specifier = ">=2" },
+    { name = "nautilus-sampler", specifier = ">=1.0.6" },
     { name = "nbconvert", specifier = ">=7" },
     { name = "nbformat", specifier = ">=5.10" },
     { name = "prek", specifier = ">=0.5" },

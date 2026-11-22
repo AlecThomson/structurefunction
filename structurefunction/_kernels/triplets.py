@@ -20,6 +20,7 @@ great circles through ``x0`` are straight lines through the origin.
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
@@ -31,7 +32,9 @@ from structurefunction._kernels.common import (
     projected_variance,
     soft_bins,
 )
-from structurefunction.types import FloatArray, IntArray
+
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray, IntArray
 
 
 @numba.njit(cache=True)
@@ -40,6 +43,7 @@ def _grow(a: IntArray) -> IntArray:
     out[: a.size] = a
     return out
 
+
 @numba.njit(cache=True, inline="always")
 def _bearing(x: FloatArray, east: FloatArray, north: FloatArray) -> float:
     """Bearing of ``x`` in [0, 2 pi) in the tangent plane spanned by east/north."""
@@ -47,15 +51,15 @@ def _bearing(x: FloatArray, east: FloatArray, north: FloatArray) -> float:
     n = x[0] * north[0] + x[1] * north[1] + x[2] * north[2]
     b = math.atan2(e, n)
     if b < 0.0:
-        b += (2.0 * math.pi)
+        b += 2.0 * math.pi
     return b
 
 
 @numba.njit(cache=True)
-def _annulus(  # noqa: PLR0913
+def _annulus(
     m: int,
     xyz: FloatArray,
-    angular: bool,  # noqa: FBT001
+    angular: bool,
     s_lo: float,
     s_hi: float,
     start: IntArray,
@@ -111,7 +115,7 @@ def _annulus(  # noqa: PLR0913
 
 
 @numba.njit(cache=True, parallel=True)
-def exact_triplets(  # noqa: PLR0913, PLR0915, C901
+def exact_triplets(
     start: IntArray,
     end: IntArray,
     left: IntArray,
@@ -130,7 +134,7 @@ def exact_triplets(  # noqa: PLR0913, PLR0915, C901
     east: FloatArray,
     north: FloatArray,
     pcov: FloatArray,
-    use_pos: bool,  # noqa: FBT001
+    use_pos: bool,
 ) -> FloatArray:
     """Explicit triplet search around every middle source (angular data)."""
     n = xyz.shape[0]
@@ -142,9 +146,19 @@ def exact_triplets(  # noqa: PLR0913, PLR0915, C901
         buf = np.empty(1024, np.intp)
         for m in range(slot, n, n_slots):
             buf, k = _annulus(
-                m, xyz, True, s_lo, s_hi, start, end, left, centre, radius,  # noqa: FBT003
-                roots, buf,
-            )  # fmt: skip
+                m,
+                xyz,
+                True,
+                s_lo,
+                s_hi,
+                start,
+                end,
+                left,
+                centre,
+                radius,
+                roots,
+                buf,
+            )
             if k < 2:  # noqa: PLR2004
                 continue
             idx = buf[:k].copy()
@@ -155,7 +169,7 @@ def exact_triplets(  # noqa: PLR0913, PLR0915, C901
                 rel = xyz[i] - xyz[m]
                 bear[t] = _bearing(rel, east[m], north[m])
                 c2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]
-                sep[t] = chord_to_sep(math.sqrt(c2), True)  # noqa: FBT003
+                sep[t] = chord_to_sep(math.sqrt(c2), angular=True)
             o = np.argsort(bear)
             idx = idx[o]
             bear = bear[o]
@@ -180,27 +194,48 @@ def exact_triplets(  # noqa: PLR0913, PLR0915, C901
                     sigma = 0.0
                     if use_pos:
                         va = projected_variance(
-                            xyz[a], xyz[m], east[a], north[a],
-                            pcov[a, 0], pcov[a, 1], pcov[a, 2],
-                        )  # fmt: skip
+                            xyz[a],
+                            xyz[m],
+                            east[a],
+                            north[a],
+                            pcov[a, 0],
+                            pcov[a, 1],
+                            pcov[a, 2],
+                        )
                         vb = projected_variance(
-                            xyz[b], xyz[m], east[b], north[b],
-                            pcov[b, 0], pcov[b, 1], pcov[b, 2],
-                        )  # fmt: skip
+                            xyz[b],
+                            xyz[m],
+                            east[b],
+                            north[b],
+                            pcov[b, 0],
+                            pcov[b, 1],
+                            pcov[b, 2],
+                        )
                         # The middle point's error cancels in the mean arm.
                         sigma = 0.5 * math.sqrt(va + vb)
                     wt = w[m] * w[a] * w[b]
                     df = f[a] + f[b] - 2.0 * f[m]
                     bias = sig2[a] + sig2[b] + 4.0 * sig2[m]
                     soft_bins(
-                        acc, slot, mean, sigma, edges, patch[m], patch[a],
-                        patch[b], True, wt, wt * df * df, wt * bias, 1.0,  # noqa: FBT003
-                    )  # fmt: skip
+                        acc,
+                        slot,
+                        mean,
+                        sigma,
+                        edges,
+                        patch[m],
+                        patch[a],
+                        patch[b],
+                        True,
+                        wt,
+                        wt * df * df,
+                        wt * bias,
+                        1.0,
+                    )
     return acc.sum(axis=0)
 
 
 @numba.njit(cache=True, parallel=True)
-def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
+def binned_triplets(
     start: IntArray,
     end: IntArray,
     left: IntArray,
@@ -214,7 +249,6 @@ def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
     sig2: FloatArray,
     w: FloatArray,
     patch: IntArray,
-    edges: FloatArray,
     sub_edges: FloatArray,
     sub_to_bin: IntArray,
     n_sector: int,
@@ -265,21 +299,21 @@ def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
                     rel2 = centre[node, 2] - xyz[m, 2]
                     d = math.sqrt(rel0 * rel0 + rel1 * rel1 + rel2 * rel2)
                     rad = radius[node]
-                    smax = chord_to_sep(d + rad, True)  # noqa: FBT003
-                    smin = chord_to_sep(max(d - rad, 0.0), True)  # noqa: FBT003
+                    smax = chord_to_sep(d + rad, angular=True)
+                    smin = chord_to_sep(max(d - rad, 0.0), angular=True)
                     if smax < s_lo or smin >= s_hi:
                         continue
                     accepted = False
                     if d > rad:
                         j0 = find_bin(smin, sub_edges)
                         j1 = find_bin(smax, sub_edges)
-                        pe = rel0 * em[0] + rel1 * em[1] + rel2 * em[2]
-                        pn = rel0 * nm[0] + rel1 * nm[1] + rel2 * nm[2]
-                        rho = math.sqrt(pe * pe + pn * pn)
+                        p_east = rel0 * em[0] + rel1 * em[1] + rel2 * em[2]
+                        p_north = rel0 * nm[0] + rel1 * nm[1] + rel2 * nm[2]
+                        rho = math.sqrt(p_east * p_east + p_north * p_north)
                         if j0 >= 0 and j0 == j1 and rho > rad:
-                            bc = math.atan2(pe, pn)
+                            bc = math.atan2(p_east, p_north)
                             if bc < 0.0:
-                                bc += (2.0 * math.pi)
+                                bc += 2.0 * math.pi
                             hw = math.asin(rad / rho)
                             # Sectors are centred on multiples of width.
                             lo_b = bc - hw + 0.5 * width
@@ -293,7 +327,7 @@ def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
                                 cell = j0 * n_sector + s0
                                 wn = moments[node, 0]
                                 dmu = moments[node, 1] - f0
-                                sep_c = chord_to_sep(d, True)  # noqa: FBT003
+                                sep_c = chord_to_sep(d, angular=True)
                                 if not touched[p, cell]:
                                     touched[p, cell] = True
                                     if n_t >= t_patch.size:
@@ -327,15 +361,17 @@ def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
                         q0 = xyz[i, 0] - xyz[m, 0]
                         q1 = xyz[i, 1] - xyz[m, 1]
                         q2 = xyz[i, 2] - xyz[m, 2]
-                        s = chord_to_sep(math.sqrt(q0 * q0 + q1 * q1 + q2 * q2), True)  # noqa: FBT003
+                        s = chord_to_sep(
+                            math.sqrt(q0 * q0 + q1 * q1 + q2 * q2), angular=True
+                        )
                         j = find_bin(s, sub_edges)
                         if j < 0:
                             continue
-                        pe = q0 * em[0] + q1 * em[1] + q2 * em[2]
-                        pn = q0 * nm[0] + q1 * nm[1] + q2 * nm[2]
-                        bi = math.atan2(pe, pn)
+                        p_east = q0 * em[0] + q1 * em[1] + q2 * em[2]
+                        p_north = q0 * nm[0] + q1 * nm[1] + q2 * nm[2]
+                        bi = math.atan2(p_east, p_north)
                         if bi < 0.0:
-                            bi += (2.0 * math.pi)
+                            bi += 2.0 * math.pi
                         sec = int((bi + 0.5 * width) // width) % n_sector
                         cell = j * n_sector + sec
                         p = patch[i]
@@ -395,4 +431,3 @@ def binned_triplets(  # noqa: PLR0912, PLR0913, PLR0915, C901
             for q in range(n_p):
                 patch_seen[plist[q]] = False
     return acc.sum(axis=0)
-

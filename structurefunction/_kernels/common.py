@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import math
 from enum import IntEnum
+from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
 
-from structurefunction.types import FloatArray
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray
 
 
 class Kind(IntEnum):
@@ -54,7 +56,7 @@ def new_accumulator(n_slots: int, n_bins: int, n_patch: int) -> FloatArray:
 
 
 @numba.njit(cache=True, inline="always")
-def chord_to_sep(chord: float, angular: bool) -> float:  # noqa: FBT001
+def chord_to_sep(chord: float, angular: bool) -> float:
     """Chord length to separation (great-circle angle, or 3D distance)."""
     if not angular:
         return chord
@@ -78,7 +80,7 @@ def norm_cdf(x: float) -> float:
 
 
 @numba.njit(cache=True)
-def add_pair(  # noqa: PLR0913
+def add_pair(
     acc: FloatArray,
     slot: int,
     b: int,
@@ -102,7 +104,7 @@ def add_pair(  # noqa: PLR0913
 
 
 @numba.njit(cache=True)
-def add_triplet(  # noqa: PLR0913
+def add_triplet(
     acc: FloatArray,
     slot: int,
     b: int,
@@ -133,7 +135,7 @@ def add_triplet(  # noqa: PLR0913
 
 
 @numba.njit(cache=True, inline="always")
-def _add(  # noqa: PLR0913
+def _add(
     acc: FloatArray,
     slot: int,
     kind: int,
@@ -154,7 +156,7 @@ def _add(  # noqa: PLR0913
 
 
 @numba.njit(cache=True, inline="always")
-def projected_variance(  # noqa: PLR0913
+def projected_variance(
     xi: FloatArray,
     xj: FloatArray,
     east_i: FloatArray,
@@ -164,20 +166,25 @@ def projected_variance(  # noqa: PLR0913
     cov_en: float,
 ) -> float:
     """Variance of source ``i``'s position along the direction towards ``j``."""
-    de = (xj[0] - xi[0]) * east_i[0] + (xj[1] - xi[1]) * east_i[1] + (
-        xj[2] - xi[2]
-    ) * east_i[2]
-    dn = (xj[0] - xi[0]) * north_i[0] + (xj[1] - xi[1]) * north_i[1] + (
-        xj[2] - xi[2]
-    ) * north_i[2]
-    norm2 = de * de + dn * dn
+    de = (
+        (xj[0] - xi[0]) * east_i[0]
+        + (xj[1] - xi[1]) * east_i[1]
+        + (xj[2] - xi[2]) * east_i[2]
+    )
+    dn = (
+        (xj[0] - xi[0]) * north_i[0]
+        + (xj[1] - xi[1]) * north_i[1]
+        + (xj[2] - xi[2]) * north_i[2]
+    )
+    norm2: float = de * de + dn * dn
     if norm2 <= 0.0:
         return 0.5 * (var_e + var_n)
-    return (de * de * var_e + dn * dn * var_n + 2.0 * de * dn * cov_en) / norm2
+    proj: float = de * de * var_e + dn * dn * var_n + 2.0 * de * dn * cov_en
+    return proj / norm2
 
 
 @numba.njit(cache=True)
-def soft_bins(  # noqa: PLR0913
+def soft_bins(
     acc: FloatArray,
     slot: int,
     sep: float,
@@ -186,7 +193,7 @@ def soft_bins(  # noqa: PLR0913
     pa: int,
     pb: int,
     p2: int,
-    triplet: bool,  # noqa: FBT001
+    triplet: bool,
     w: float,
     wd: float,
     wb: float,
@@ -218,11 +225,28 @@ def soft_bins(  # noqa: PLR0913
             continue
         if triplet:
             add_triplet(
-                acc, slot, k, pa, pb, p2, frac * w, frac * wd, frac * wb,
-                frac * w * sep, frac * n,
-            )  # fmt: skip
+                acc,
+                slot,
+                k,
+                pa,
+                pb,
+                p2,
+                frac * w,
+                frac * wd,
+                frac * wb,
+                frac * w * sep,
+                frac * n,
+            )
         else:
             add_pair(
-                acc, slot, k, pa, pb, frac * w, frac * wd, frac * wb,
-                frac * w * sep, frac * n,
-            )  # fmt: skip
+                acc,
+                slot,
+                k,
+                pa,
+                pb,
+                frac * w,
+                frac * wd,
+                frac * wb,
+                frac * w * sep,
+                frac * n,
+            )

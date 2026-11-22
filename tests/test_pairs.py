@@ -1,23 +1,34 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import astropy.units as u
 import numpy as np
 import pytest
 from astropy.coordinates import SkyCoord, search_around_sky
+
+from structurefunction import SFResult, structure_function
+
 from conftest import Catalogue, make_catalogue
 from reference import sf2, unit_vectors
 
-from structurefunction import SFResult, structure_function
-from structurefunction.types import FloatArray
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray
 
 EDGES = np.geomspace(0.1, 6.0, 9) * u.deg
 
 
 def run(cat: Catalogue, tol: float = 0.0) -> SFResult[FloatArray]:
     return structure_function(
-        cat.values, cat.errors, cat.coords, bins=EDGES, weights=cat.weights,
-        bin_tolerance=tol, patches=8, rng=0,
-    )  # fmt: skip
+        cat.values,
+        cat.errors,
+        cat.coords,
+        bins=EDGES,
+        weights=cat.weights,
+        bin_tolerance=tol,
+        patches=8,
+        rng=0,
+    )
 
 
 def test_exact_tree_matches_reference(small: Catalogue) -> None:
@@ -52,9 +63,15 @@ def test_frame_independent(small: Catalogue) -> None:
     icrs = run(small)
     gal = small.coords.galactic
     res = structure_function(
-        small.values, small.errors, gal, bins=EDGES, weights=small.weights,
-        bin_tolerance=0.0, patches=8, rng=0,
-    )  # fmt: skip
+        small.values,
+        small.errors,
+        gal,
+        bins=EDGES,
+        weights=small.weights,
+        bin_tolerance=0.0,
+        patches=8,
+        rng=0,
+    )
     np.testing.assert_allclose(res.sf, icrs.sf, rtol=1e-9)
 
 
@@ -62,10 +79,15 @@ def test_units_round_trip(small: Catalogue) -> None:
     plain = run(small)
     unit = u.rad / u.m**2
     res = structure_function(
-        small.values * unit, (small.errors * unit).to(u.rad / u.cm**2),
-        small.coords, bins=EDGES, weights=small.weights, bin_tolerance=0.0,
-        patches=8, rng=0,
-    )  # fmt: skip
+        small.values * unit,
+        (small.errors * unit).to(u.rad / u.cm**2),
+        small.coords,
+        bins=EDGES,
+        weights=small.weights,
+        bin_tolerance=0.0,
+        patches=8,
+        rng=0,
+    )
     assert res.sf.unit == unit**2
     np.testing.assert_allclose(res.sf.value, plain.sf, rtol=1e-10)
 
@@ -120,17 +142,29 @@ def test_matches_treecorr(small: Catalogue) -> None:
     f = small.values - np.average(small.values, weights=small.weights)
     edges = EDGES.to_value(u.deg)
     cfg = {
-        "min_sep": edges[0], "max_sep": edges[-1], "nbins": edges.size - 1,
-        "sep_units": "deg", "bin_slop": 0.0, "metric": "Arc",
-    }  # fmt: skip
+        "min_sep": edges[0],
+        "max_sep": edges[-1],
+        "nbins": edges.size - 1,
+        "sep_units": "deg",
+        "bin_slop": 0.0,
+        "metric": "Arc",
+    }
     cat_f = treecorr.Catalog(
-        ra=small.lon, dec=small.lat, ra_units="deg", dec_units="deg", k=f,
+        ra=small.lon,
+        dec=small.lat,
+        ra_units="deg",
+        dec_units="deg",
+        k=f,
         w=small.weights,
-    )  # fmt: skip
+    )
     cat_f2 = treecorr.Catalog(
-        ra=small.lon, dec=small.lat, ra_units="deg", dec_units="deg", k=f**2,
+        ra=small.lon,
+        dec=small.lat,
+        ra_units="deg",
+        dec_units="deg",
+        k=f**2,
         w=small.weights,
-    )  # fmt: skip
+    )
     kk = treecorr.KKCorrelation(cfg)
     kk.process(cat_f)
     nk = treecorr.NKCorrelation(cfg)

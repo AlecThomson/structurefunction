@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from structurefunction.types import FloatArray
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray
 
 
 def unit_vectors(lon_deg: FloatArray, lat_deg: FloatArray) -> FloatArray:

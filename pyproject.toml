@@ -4,7 +4,9 @@ requires = [ "hatch-vcs", "hatchling>=1.26" ]
 
 [project]
 name = "structurefunction"
-description = "Fast, robust structure functions of irregularly sampled sky data, with multi-point stencils and covariance errors."
+description = """\
+  Fast, robust structure functions of irregularly sampled sky data, with multi-point stencils and covariance errors.\
+  """
 readme = "README.md"
 keywords = [ "astronomy", "faraday rotation", "rotation measure", "structure function", "turbulence" ]
 license = "MIT"
@@ -20,12 +22,14 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Topic :: Scientific/Engineering :: Astronomy",
   "Typing :: Typed",
 ]
 dynamic = [ "version" ]
 dependencies = [
   "astropy>=6",
+  "astropy-healpix>=1.1",
   "emcee>=3.1",
   "numba>=0.61",
   "numpy>=1.26",
@@ -40,6 +44,16 @@ urls.Homepage = "https://github.com/AlecThomson/structurefunction"
 scripts.structurefunction = "structurefunction.cli:cli"
 
 [dependency-groups]
+dev = [
+  { include-group = "test" },
+  "mypy>=2",
+  "nautilus-sampler>=1.0.6",
+  "prek>=0.5",
+  "ruff>=0.17",
+  "scipy-stubs>=1.16",
+  # ty is beta: pin exactly; bump deliberately (see CLAUDE.md).
+  "ty==0.0.107",
+]
 test = [
   "matplotlib>=3.8",
   "nbconvert>=7",
@@ -50,19 +64,10 @@ test = [
   # TreeCorr is an independent 2-point reference in the tests only (no Windows wheels).
   "treecorr>=5.1; sys_platform!='win32'",
 ]
-dev = [
-  { include-group = "test" },
-  "mypy>=2",
-  "prek>=0.5",
-  "ruff>=0.17",
-  "scipy-stubs>=1.16",
-  # ty is beta: pin exactly; bump deliberately (see CLAUDE.md).
-  "ty==0.0.107",
-]
 docs = [
   "furo>=2024.8.6",
-  "matplotlib>=3.8",
   "ipykernel>=6",
+  "matplotlib>=3.8",
   "myst-parser>=4",
   "nbsphinx>=0.9.6",
   "sphinx>=7",
@@ -80,10 +85,12 @@ line-length = 88
 src = [ "structurefunction", "tests" ]
 lint.select = [ "ALL" ]
 lint.ignore = [
-  "COM812", # conflicts with the formatter
-  "D203",   # conflicts with D211
-  "D213",   # conflicts with D212
-  "ISC001", # conflicts with the formatter
+  "COM812",  # conflicts with the formatter
+  "CPY001",  # licence is declared once (LICENSE, pyproject); no per-file headers
+  "D203",    # conflicts with D211
+  "D213",    # conflicts with D212
+  "ISC001",  # conflicts with the formatter
+  "PLR0917", # conflicts with project style: no keyword-only `*` markers
 ]
 lint.per-file-ignores."benchmarks/**" = [
   "INP001", # scripts, not a package
@@ -91,9 +98,21 @@ lint.per-file-ignores."benchmarks/**" = [
 ]
 lint.per-file-ignores."docs/**" = [ "INP001" ]
 lint.per-file-ignores."docs/examples/*.ipynb" = [
-  "D100",   # notebooks have no module docstring
-  "E402",   # imports live in the cell where they are first needed
-  "T201",   # examples print results
+  "D100",    # notebooks have no module docstring
+  "E402",    # imports live in the cell where they are first needed
+  "PLR2004", # example checks compare against literal thresholds
+  "S101",    # self-checking examples assert their results
+  "T201",    # examples print results
+]
+lint.per-file-ignores."structurefunction/_kernels/**" = [
+  # numba hot loops are kept flat: splitting them adds call overhead and
+  # prevents fusion, and they take many array arguments by design.
+  "C901",
+  "FBT001",
+  "FBT003",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
 ]
 lint.per-file-ignores."tests/**" = [
   "D",       # test names are the documentation
@@ -101,48 +120,71 @@ lint.per-file-ignores."tests/**" = [
   "PLR2004", # magic numbers are expected values
   "S101",    # pytest uses assert
 ]
+lint.isort.known-first-party = [ "structurefunction" ]
+lint.isort.known-local-folder = [ "conftest", "reference" ]
 lint.isort.required-imports = [ "from __future__ import annotations" ]
 lint.pydocstyle.convention = "google"
 
-[tool.pytest]
-minversion = "9.0"
-addopts = [ "-ra", "--showlocals" ]
-strict = true
-filterwarnings = [ "error" ]
-log_level = "INFO"
-testpaths = [ "tests" ]
-markers = [
-  "slow: statistical calibration tests (many mocks)",
-  "slow_uncompiled: too slow to run with NUMBA_DISABLE_JIT=1",
+[tool.repo-review]
+ignore = [
+  "PC140", # mypy and ty run as local hooks so they see the project's real deps
+  "PC170", # no reStructuredText in the repository
 ]
 
-[tool.coverage]
-run.source = [ "structurefunction" ]
-report.exclude_also = [ '\.\.\.', 'if TYPE_CHECKING:' ]
+[tool.typos]
+default.extend-identifiers = { NDArray = "NDArray" }
+default.extend-words = { arange = "arange" }
 
 [tool.mypy]
 files = [ "structurefunction", "tests" ]
 python_version = "3.12"
-strict = true
 warn_unreachable = true
 enable_error_code = [ "ignore-without-code", "redundant-expr", "truthy-bool" ]
+strict = true
 
 [[tool.mypy.overrides]]
-# Neither ships type information.
-module = [ "numba.*", "emcee.*", "nautilus.*", "corner.*", "treecorr.*" ]
+# These ship no type information. astropy in particular is untyped (no
+# py.typed); it is confined to structurefunction/_units.py and the public
+# signatures, where it degrades to Any.
+module = [
+  "astropy.*",
+  "astropy_healpix.*",
+  "corner.*",
+  "emcee.*",
+  "nautilus.*",
+  "nbconvert.*",
+  "nbformat.*",
+  "numba.*",
+  "treecorr.*",
+]
 ignore_missing_imports = true
+follow_untyped_imports = false
 
 [[tool.mypy.overrides]]
-# Tests use pytest fixtures and loose call patterns.
-module = [ "tests.*" ]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
+# nbconvert/nbformat are untyped; only the notebook runner calls them.
+module = [ "test_examples" ]
+disallow_untyped_calls = false
 
-[tool.ty.environment]
-python-version = "3.12"
+[tool.ty]
+src.include = [ "structurefunction", "tests" ]
+environment.python-version = "3.12"
 
-[tool.ty.src]
-include = [ "structurefunction", "tests" ]
+[tool.pytest]
+addopts = [ "-ra", "--showlocals" ]
+filterwarnings = [
+  "error",
+  # Small test catalogues trip the resampling guard rails; tests opt back in.
+  "ignore::structurefunction.StructureFunctionWarning",
+]
+log_level = "INFO"
+markers = [
+  "slow: statistical calibration tests (many mocks)",
+  "slow_uncompiled: too slow to run with NUMBA_DISABLE_JIT=1",
+]
+minversion = "9.0"
+strict = true
+testpaths = [ "tests" ]
 
-[tool.typos]
-default.extend-words = { arange = "arange" }
+[tool.coverage]
+run.source = [ "structurefunction" ]
+report.exclude_also = [ '\.\.\.', "if TYPE_CHECKING:" ]

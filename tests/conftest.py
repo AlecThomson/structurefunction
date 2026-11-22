@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import astropy.units as u
 import numpy as np
 import pytest
 from astropy.coordinates import SkyCoord
 
-from structurefunction import StructureFunctionWarning
-from structurefunction.types import FloatArray
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray
 
 
 @dataclass(frozen=True)
@@ -38,9 +38,3 @@ def make_catalogue(n: int, seed: int, size_deg: float = 8.0) -> Catalogue:
 @pytest.fixture
 def small() -> Catalogue:
     return make_catalogue(400, seed=1)
-
-
-@pytest.fixture(autouse=True)
-def _quiet_resampling_warnings() -> None:
-    """Small test catalogues trip the patch-size guard rails; tests opt back in."""
-    warnings.filterwarnings("ignore", category=StructureFunctionWarning)

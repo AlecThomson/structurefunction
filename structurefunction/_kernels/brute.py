@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
@@ -12,11 +13,13 @@ from structurefunction._kernels.common import (
     projected_variance,
     soft_bins,
 )
-from structurefunction.types import FloatArray, IntArray
+
+if TYPE_CHECKING:
+    from structurefunction.typedefs import FloatArray, IntArray
 
 
 @numba.njit(cache=True, inline="always")
-def pair_into(  # noqa: PLR0913
+def pair_into(
     acc: FloatArray,
     slot: int,
     i: int,
@@ -27,11 +30,11 @@ def pair_into(  # noqa: PLR0913
     w: FloatArray,
     patch: IntArray,
     edges: FloatArray,
-    angular: bool,  # noqa: FBT001
+    angular: bool,
     east: FloatArray,
     north: FloatArray,
     pcov: FloatArray,
-    use_pos: bool,  # noqa: FBT001
+    use_pos: bool,
 ) -> None:
     """Accumulate the exact contribution of source pair ``(i, j)``."""
     dx = xyz[i, 0] - xyz[j, 0]
@@ -50,13 +53,24 @@ def pair_into(  # noqa: PLR0913
     wij = w[i] * w[j]
     df = f[i] - f[j]
     soft_bins(
-        acc, slot, sep, sigma, edges, patch[i], patch[j], patch[j], False,  # noqa: FBT003
-        wij, wij * df * df, wij * (sig2[i] + sig2[j]), 1.0,
-    )  # fmt: skip
+        acc,
+        slot,
+        sep,
+        sigma,
+        edges,
+        patch[i],
+        patch[j],
+        patch[j],
+        False,
+        wij,
+        wij * df * df,
+        wij * (sig2[i] + sig2[j]),
+        1.0,
+    )
 
 
 @numba.njit(cache=True, parallel=True)
-def brute_pairs(  # noqa: PLR0913
+def brute_pairs(
     xyz: FloatArray,
     f: FloatArray,
     sig2: FloatArray,
@@ -64,11 +78,11 @@ def brute_pairs(  # noqa: PLR0913
     patch: IntArray,
     edges: FloatArray,
     acc: FloatArray,
-    angular: bool,  # noqa: FBT001
+    angular: bool,
     east: FloatArray,
     north: FloatArray,
     pcov: FloatArray,
-    use_pos: bool,  # noqa: FBT001
+    use_pos: bool,
 ) -> FloatArray:
     """All-pairs exact two-point accumulation.
 
@@ -84,9 +98,22 @@ def brute_pairs(  # noqa: PLR0913
         for i in range(slot, n, n_slots):
             for j in range(i + 1, n):
                 pair_into(
-                    acc, slot, i, j, xyz, f, sig2, w, patch, edges, angular,
-                    east, north, pcov, use_pos,
-                )  # fmt: skip
+                    acc,
+                    slot,
+                    i,
+                    j,
+                    xyz,
+                    f,
+                    sig2,
+                    w,
+                    patch,
+                    edges,
+                    angular,
+                    east,
+                    north,
+                    pcov,
+                    use_pos,
+                )
     return acc.sum(axis=0)
 
 
