@@ -142,6 +142,8 @@ ignore = [
 ]
 
 [tool.typos]
+# Notebook cell ids are random hex.
+default.extend-ignore-re = [ '"id": "[0-9a-f]+"' ]
 default.extend-identifiers = { NDArray = "NDArray" }
 default.extend-words = { arange = "arange" }
 
