@@ -86,14 +86,19 @@ def test_string_aliases_match_enums(
 
 
 def test_bare_command_prints_help() -> None:
+    import os
     import subprocess
     import sys
 
+    # Python 3.14 colours argparse help unless told not to.
+    env = {k: v for k, v in os.environ.items() if k != "FORCE_COLOR"}
+    env["NO_COLOR"] = "1"
     run = subprocess.run(
         [sys.executable, "-m", "structurefunction"],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     assert run.returncode == 0
     assert "usage: structurefunction" in run.stdout

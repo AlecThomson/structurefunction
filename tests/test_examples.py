@@ -6,6 +6,7 @@ import runpy
 from pathlib import Path
 
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import nbformat
 import pytest
 from nbconvert import ScriptExporter
@@ -22,6 +23,8 @@ def test_notebook_runs(
         pytest.importorskip("treecorr")
     monkeypatch.setenv("JUPYTER_PLATFORM_DIRS", "1")
     mpl.use("Agg")
+    # Agg cannot show figures and warns; close them instead.
+    monkeypatch.setattr(plt, "show", lambda: plt.close("all"))
     script, _ = ScriptExporter().from_notebook_node(
         nbformat.read(notebook, as_version=4)
     )
