@@ -24,7 +24,7 @@ Faraday rotation measures of background sources.
 pip install structurefunction
 ```
 
-Plotting needs the `plot` extra; nested-sampling evidence needs `evidence`.
+Nested-sampling evidence (nautilus) needs the `evidence` extra.
 
 ## Usage
 

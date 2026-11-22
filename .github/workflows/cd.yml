@@ -27,9 +27,57 @@ jobs:
           persist-credentials: false
       - uses: hynek/build-and-inspect-python-package@67230f7b8410ae0052b39c1efc89d89fff43ff10 # v3.0.2
 
+  smoke:
+    name: Installed wheel works on its own
+    needs: [dist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Packages
+          path: dist
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install only the wheel and its runtime dependencies
+        run: |
+          uv venv smoke
+          uv pip install --python smoke dist/*.whl
+      - name: Run both CLI subcommands, with plots
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$GITHUB_WORKSPACE/smoke/bin/python" - <<'PY'
+          from importlib import resources
+
+          import numpy as np
+          import astropy.units as u
+          from astropy.table import Table
+
+          path = resources.files("structurefunction.data") / "mao2010_ngp.ecsv"
+          Table.read(path).write("mao.ecsv", overwrite=True)
+          rng = np.random.default_rng(0)
+          n = 20000
+          Table(
+              {
+                  "ra": rng.uniform(0, 360, n) * u.deg,
+                  "dec": np.degrees(np.arcsin(rng.uniform(-1, 1, n))) * u.deg,
+                  "rm": rng.normal(0, 2, n),
+                  "rm_err": np.full(n, 0.5),
+              }
+          ).write("sky.fits", overwrite=True)
+          PY
+          bin="$GITHUB_WORKSPACE/smoke/bin"
+          "$bin/structurefunction"
+          "$bin/structurefunction" --help
+          "$bin/structurefunction" sf mao.ecsv sf.ecsv --value rm --error rm_err \
+            --bins 5 --jk-regions 16 --plot sf.png
+          "$bin/structurefunction" skymap sky.fits map.fits --value rm --error rm_err \
+            --radius-deg 40 --bins 3 --min-sep-deg 2 --fit-model power_law --plot map.png
+          "$bin/python" -m structurefunction --help
+
   publish:
     name: Publish to PyPI
-    needs: [dist]
+    needs: [dist, smoke]
     environment: pypi
     permissions:
       id-token: write

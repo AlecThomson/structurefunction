@@ -83,3 +83,17 @@ def test_string_aliases_match_enums(
 ) -> None:
     literal = next(a for a in typing.get_args(alias.__value__) if a is not enum)
     assert set(typing.get_args(literal)) == {m.value for m in enum}
+
+
+def test_bare_command_prints_help() -> None:
+    import subprocess
+    import sys
+
+    run = subprocess.run(
+        [sys.executable, "-m", "structurefunction"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0
+    assert "usage: structurefunction" in run.stdout

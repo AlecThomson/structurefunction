@@ -163,8 +163,6 @@ def test_cli_and_plot(tmp_path: Path) -> None:
             "power_law",
             "--plot",
             str(png),
-            "--plot-quantity",
-            "slope",
             "--seed",
             "0",
         ]

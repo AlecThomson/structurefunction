@@ -17,7 +17,7 @@ from capn_crunch import add_options_to_parser, create_options_from_parser
 from structurefunction.core import structure_function_from_table
 from structurefunction.io import write
 from structurefunction.options import StencilOptions
-from structurefunction.skymap import structure_function_skymap
+from structurefunction.skymap import SkyMapResult, structure_function_skymap
 from structurefunction.types import ErrorMethod, FitModel, Taper
 
 
@@ -47,8 +47,10 @@ def _add_common(parser: ArgumentParser) -> None:
 def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     """Build (or extend) the argument parser."""
     if parser is None:
-        parser = ArgumentParser(description="Structure functions of sky data.")
-    sub = parser.add_subparsers(dest="command", required=True)
+        parser = ArgumentParser(
+            prog="structurefunction", description="Structure functions of sky data."
+        )
+    sub = parser.add_subparsers(dest="command")
 
     sf = sub.add_parser("sf", help="One structure function for the whole table")
     _add_common(sf)
@@ -81,7 +83,14 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
         choices=[*(m.value for m in FitModel), "none"],
         default="broken_power_law",
     )
-    sky.add_argument("--plot-quantity", default="slope_1", help="Quantity for --plot")
+    sky.add_argument(
+        "--plot-quantity",
+        default=None,
+        help="Quantity for --plot (default: the first fitted slope, else the SF)",
+    )
+    sky.add_argument(
+        "--plot-bin", type=int, default=None, help="Bin for per-bin quantities"
+    )
     return parser
 
 
@@ -90,10 +99,26 @@ def _column(table: Table, name: str) -> u.Quantity:
     return u.Quantity(col) if getattr(col, "unit", None) is not None else col
 
 
+def _skymap_plot_choice(
+    sky: SkyMapResult, quantity: str | None, bin_index: int | None
+) -> tuple[str, int | None]:
+    """Quantity (and bin) to plot: the first fitted slope, else the middle-bin SF."""
+    if quantity is None:
+        slopes = [name for name in sky.param_names if name.startswith("slope")]
+        quantity = slopes[0] if slopes else "sf"
+    if quantity in {"sf", "sf_err", "count", "separation"} and bin_index is None:
+        bin_index = (sky.bin_edges.size - 1) // 2
+    return quantity, bin_index
+
+
 def cli(args: Namespace | None = None) -> None:
     """Run the command-line interface."""
     if args is None:
-        args = get_parser().parse_args()
+        parser = get_parser()
+        args = parser.parse_args()
+        if args.command is None:
+            parser.print_help()
+            return
     table = Table.read(args.table)
     stencil = create_options_from_parser(args, StencilOptions)
     if args.command == "sf":
@@ -143,7 +168,10 @@ def cli(args: Namespace | None = None) -> None:
     if args.plot is not None:
         from structurefunction.plotting import plot_skymap
 
-        plot_skymap(sky, args.plot_quantity).savefig(args.plot)
+        quantity, bin_index = _skymap_plot_choice(
+            sky, args.plot_quantity, args.plot_bin
+        )
+        plot_skymap(sky, quantity, bin_index).savefig(args.plot)
 
 
 if __name__ == "__main__":

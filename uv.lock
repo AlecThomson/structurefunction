@@ -577,18 +577,6 @@ wheels = [
 ]
 
 [[package]]
-name = "corner"
-version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "matplotlib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/06/0d045530fa994ab450f6a98b7ad9f74c90a8abf5271d3690f60d1aa933d8/corner-2.3.0.tar.gz", hash = "sha256:685ecb1e778809b78c6783f4a4691d023bbd9f781c9efda683c2b793878b561c", size = 6089474, upload-time = "2026-07-05T17:56:05.355Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/cb/17a130e548ee1777f2a66e09240c531a9bf79454add7ef1198fe1e41c412/corner-2.3.0-py3-none-any.whl", hash = "sha256:f93f0a4d77ff6852d6ddc80a6a99038117be64e3b5b49d96a82c9f5974cce126", size = 16954, upload-time = "2026-07-05T17:56:03.827Z" },
-]
-
-[[package]]
 name = "coverage"
 version = "7.17.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3010,6 +2998,7 @@ dependencies = [
     { name = "astropy-healpix" },
     { name = "capn-crunch" },
     { name = "emcee" },
+    { name = "matplotlib" },
     { name = "numba" },
     { name = "numpy" },
     { name = "pydantic" },
@@ -3019,10 +3008,6 @@ dependencies = [
 [package.optional-dependencies]
 evidence = [
     { name = "nautilus-sampler" },
-]
-plot = [
-    { name = "corner" },
-    { name = "matplotlib" },
 ]
 
 [package.dev-dependencies]
@@ -3070,16 +3055,15 @@ requires-dist = [
     { name = "astropy", specifier = ">=6" },
     { name = "astropy-healpix", specifier = ">=1.1" },
     { name = "capn-crunch", specifier = ">=1.2" },
-    { name = "corner", marker = "extra == 'plot'", specifier = ">=2.2" },
     { name = "emcee", specifier = ">=3.1" },
-    { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8" },
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "nautilus-sampler", marker = "extra == 'evidence'", specifier = ">=1.0.4" },
     { name = "numba", specifier = ">=0.61" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "scipy", specifier = ">=1.12" },
 ]
-provides-extras = ["evidence", "plot"]
+provides-extras = ["evidence"]
 
 [package.metadata.requires-dev]
 dev = [

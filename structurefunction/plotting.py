@@ -1,4 +1,4 @@
-"""Quick-look plots (needs the ``plot`` extra)."""
+"""Quick-look plots."""
 
 from __future__ import annotations
 
