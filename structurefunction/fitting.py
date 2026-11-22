@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import astropy.units as u
 import numpy as np
+from astropy.table import QTable
 from scipy.optimize import least_squares, minimize
 
 from structurefunction.logging import logger
@@ -113,17 +114,65 @@ class FitPriors:
 
     log10_amplitude: tuple[float, float] | None = None
     log10_break: tuple[float, float] | None = None
-    slope: tuple[float, float] = (-2.0, 6.0)
+    slope: tuple[float, float] = (0.0, 6.0)
+    """Structure functions do not decrease with separation, so slopes are >= 0."""
+
+
+def constant(r: FloatArray, theta: FloatArray) -> FloatArray:
+    """``A`` at every separation, with ``theta = (log10 A,)``."""
+    return np.full(r.shape, 10.0 ** theta[0])
 
 
 def _model_fn(
     model: FitModel, pivot: float
 ) -> Callable[[FloatArray, FloatArray], FloatArray]:
+    if model == FitModel.CONSTANT:
+        return constant
     if model == FitModel.POWER_LAW:
         return lambda r, th: power_law(r, th, pivot)
     if model == FitModel.BROKEN_POWER_LAW:
         return broken_power_law
     return smooth_broken_power_law
+
+
+def _parameter_names(model: FitModel) -> tuple[str, ...]:
+    if model == FitModel.CONSTANT:
+        return ("log10_amplitude",)
+    if model == FitModel.POWER_LAW:
+        return ("log10_amplitude", "slope")
+    return ("log10_amplitude", "log10_break", "slope_1", "slope_2")
+
+
+def _bounds(
+    model: FitModel,
+    amplitude: tuple[float, float],
+    log_break: tuple[float, float],
+    slope: tuple[float, float],
+) -> tuple[FloatArray, FloatArray]:
+    """Lower and upper prior bounds, in parameter order."""
+    if model == FitModel.CONSTANT:
+        ranges = [amplitude]
+    elif model == FitModel.POWER_LAW:
+        ranges = [amplitude, slope]
+    else:
+        ranges = [amplitude, log_break, slope, slope]
+    return np.array([r[0] for r in ranges]), np.array([r[1] for r in ranges])
+
+
+def _starting_points(
+    model: FitModel, log_amplitude: float, log_break: tuple[float, float]
+) -> list[FloatArray]:
+    """Several starts: the break makes the likelihood multi-modal."""
+    if model == FitModel.CONSTANT:
+        return [np.array([log_amplitude])]
+    if model == FitModel.POWER_LAW:
+        return [np.array([log_amplitude, s]) for s in (0.0, 0.5, 1.0, 2.0)]
+    return [
+        np.array([log_amplitude, b, s1, s2])
+        for b in np.linspace(log_break[0], log_break[1], 7)[1:-1]
+        for s1 in (0.5, 1.5, 3.0)
+        for s2 in (0.0, 0.5)
+    ]
 
 
 def fit_sf(
@@ -136,6 +185,7 @@ def fit_sf(
     n_walkers: int = 32,
     n_steps: int = 4000,
     n_burn: int = 1000,
+    n_live: int = 500,
     rng: np.random.Generator | int | None = None,
 ) -> FitResult:
     """Fit a (broken) power law to a structure function.
@@ -150,6 +200,8 @@ def fit_sf(
         n_walkers: emcee walkers.
         n_steps: emcee steps per walker.
         n_burn: emcee steps discarded as burn-in.
+        n_live: nautilus live points. With at most four parameters, 500 gives
+            ``ln Z`` within about 0.01 of nautilus' much slower default.
         rng: Random generator or seed.
 
     Returns:
@@ -173,11 +225,7 @@ def fit_sf(
     sf_unit = result.sf.unit if isinstance(result.sf, u.Quantity) else None
     y = np.asarray(u.Quantity(result.sf).value if sf_unit else result.sf)[mask]
     cov = result.cov[np.ix_(mask, mask)]
-    names = (
-        ("log10_amplitude", "slope")
-        if model == FitModel.POWER_LAW
-        else ("log10_amplitude", "log10_break", "slope_1", "slope_2")
-    )
+    names = _parameter_names(model)
     n_par = len(names)
     n_data = int(y.size)
     if n_data <= n_par:
@@ -197,16 +245,7 @@ def fit_sf(
         math.log10(ypos.max()) + 3.0,
     )
     brk_lo, brk_hi = priors.log10_break or (math.log10(r.min()), math.log10(r.max()))
-    lo = np.array(
-        [amp_lo, priors.slope[0]]
-        if model == FitModel.POWER_LAW
-        else [amp_lo, brk_lo, priors.slope[0], priors.slope[0]]
-    )
-    hi = np.array(
-        [amp_hi, priors.slope[1]]
-        if model == FitModel.POWER_LAW
-        else [amp_hi, brk_hi, priors.slope[1], priors.slope[1]]
-    )
+    lo, hi = _bounds(model, (amp_lo, amp_hi), (brk_lo, brk_hi), priors.slope)
 
     def whitened(theta: FloatArray) -> FloatArray:
         return np.asarray(np.linalg.solve(chol, y - fn(r, theta)), dtype=np.float64)
@@ -230,13 +269,9 @@ def fit_sf(
 
     # Multi-start least squares (the break makes the problem multi-modal),
     # then refine on the actual log-posterior.
-    starts = []
-    amp0 = math.log10(float(np.median(ypos)))
-    if model == FitModel.POWER_LAW:
-        starts = [np.array([amp0, s]) for s in (0.5, 1.0, 2.0)]
-    else:
-        for b in np.linspace(brk_lo, brk_hi, 7)[1:-1]:
-            starts.extend(np.array([amp0, b, s1, 0.0]) for s1 in (0.5, 1.5, 3.0))
+    starts = _starting_points(
+        model, math.log10(float(np.median(ypos))), (brk_lo, brk_hi)
+    )
     best = None
     for x0 in starts:
         sol = least_squares(whitened, np.clip(x0, lo, hi), bounds=(lo, hi))
@@ -257,8 +292,10 @@ def fit_sf(
 
     log_z: float | None = None
     if sampler == Sampler.MAP:
-        cov_theta = _laplace(log_post, theta_map)
-        samples = gen.multivariate_normal(theta_map, cov_theta, 20000)
+        # The likelihood (not the bounded posterior) so that steps across a
+        # prior edge stay finite when the best fit sits on it.
+        cov_theta = _laplace(log_like, theta_map)
+        samples = np.clip(gen.multivariate_normal(theta_map, cov_theta, 20000), lo, hi)
     elif sampler == Sampler.EMCEE:
         import emcee
 
@@ -273,6 +310,17 @@ def fit_sf(
         ens.random_state = np.random.RandomState(seed).get_state()
         ens.run_mcmc(p0, n_steps, progress=False)
         samples = ens.get_chain(discard=n_burn, flat=True)
+    elif len(names) == 1:
+        # One parameter: integrate the posterior directly over the prior range
+        # (nautilus needs at least two parameters).
+        grid = np.linspace(lo[0], hi[0], 4001)
+        log_l = np.array([log_like(np.array([x])) for x in grid])
+        peak = log_l.max()
+        density = np.exp(log_l - peak)
+        log_z = float(peak + np.log(np.trapezoid(density, grid) / (hi[0] - lo[0])))
+        cdf = np.cumsum(density)
+        cdf /= cdf[-1]
+        samples = np.interp(gen.uniform(size=20000), cdf, grid)[:, None]
     else:
         try:
             from nautilus import Prior
@@ -286,6 +334,8 @@ def fit_sf(
         naut = NautilusSampler(
             prior,
             lambda d: log_like(np.array([d[k] for k in names])),
+            n_live=n_live,
+            n_networks=1,
             seed=int(gen.integers(2**31 - 1)),
         )
         naut.run(verbose=False)
@@ -295,7 +345,7 @@ def fit_sf(
 
     pct = np.percentile(samples, [16, 50, 84], axis=0)
     c2 = chi2(theta_map)
-    log_l = -0.5 * c2
+    best_log_like = -0.5 * c2
     logger.info("Fit %s: chi2 = %.2f for %d bins", model, c2, n_data)
     return FitResult(
         model=model,
@@ -308,8 +358,8 @@ def fit_sf(
         log_evidence=log_z,
         chi2=c2,
         n_data=n_data,
-        aic=2 * n_par - 2 * log_l,
-        bic=n_par * math.log(n_data) - 2 * log_l,
+        aic=2 * n_par - 2 * best_log_like,
+        bic=n_par * math.log(n_data) - 2 * best_log_like,
         pivot=pivot,
         separation_unit=sep_unit,
         sf_unit=sf_unit,
@@ -343,3 +393,53 @@ def _laplace(log_post: Callable[[FloatArray], float], theta: FloatArray) -> Floa
     cov = 0.5 * (cov + cov.T)
     vals, vecs = np.linalg.eigh(cov)
     return np.asarray((vecs * np.clip(vals, 1e-12, None)) @ vecs.T)
+
+
+def compare_models(
+    result: SFResult[FloatArray] | SFResult[u.Quantity],
+    models: tuple[FitModelLike, ...] = (
+        FitModel.CONSTANT,
+        FitModel.POWER_LAW,
+        FitModel.BROKEN_POWER_LAW,
+        FitModel.SMOOTH_BROKEN_POWER_LAW,
+    ),
+    sampler: SamplerLike = Sampler.MAP,
+    likelihood: LikelihoodLike = Likelihood.SELLENTIN_HEAVENS,
+    rng: np.random.Generator | int | None = None,
+) -> tuple[QTable, dict[FitModel, FitResult]]:
+    """Fit several models to the same bins and compare them.
+
+    Args:
+        result: Structure function with a covariance.
+        models: Models to fit.
+        sampler: ``map`` for AIC/BIC only; ``nautilus`` adds the evidence.
+        likelihood: How the estimated covariance enters the likelihood.
+        rng: Random generator or seed.
+
+    Returns:
+        A table sorted by BIC (lowest first) with chi-squared, AIC, BIC and
+        their differences from the best model (and ``log_evidence`` with
+        ``nautilus``), and the fits by model.
+    """
+    gen = np.random.default_rng(rng)
+    fits = {
+        FitModel(m): fit_sf(
+            result, model=m, sampler=sampler, likelihood=likelihood, rng=gen
+        )
+        for m in models
+    }
+    table = QTable()
+    table["model"] = [str(m) for m in fits]
+    table["n_params"] = [len(f.names) for f in fits.values()]
+    table["chi2"] = [f.chi2 for f in fits.values()]
+    table["n_bins"] = [f.n_data for f in fits.values()]
+    table["aic"] = [f.aic for f in fits.values()]
+    table["bic"] = [f.bic for f in fits.values()]
+    table["delta_bic"] = table["bic"] - np.min(table["bic"])
+    table["delta_aic"] = table["aic"] - np.min(table["aic"])
+    if all(f.log_evidence is not None for f in fits.values()):
+        log_z = np.array([f.log_evidence for f in fits.values()], dtype=np.float64)
+        table["log_evidence"] = log_z
+        table["delta_log_evidence"] = log_z - log_z.max()
+    table.sort("bic")
+    return table, fits

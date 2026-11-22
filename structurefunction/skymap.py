@@ -73,6 +73,38 @@ def taper_support(radius: float, taper: TaperLike = Taper.COSINE) -> float:
     return 3.0 * radius / (2.0 * math.sqrt(2.0 * math.log(2.0)))
 
 
+def pixel_size(nside: int) -> u.Quantity:
+    """Typical HEALPix pixel size, the square root of the pixel area."""
+    return u.Quantity(math.sqrt(4.0 * math.pi / (12 * nside**2)), u.rad).to(u.deg)
+
+
+def recommend_nside(
+    radius: u.Quantity, taper: TaperLike = Taper.COSINE, oversample: float = 2.0
+) -> int:
+    """Smallest HEALPix nside that samples the taper finely enough.
+
+    The taper's full width at half maximum is ``radius`` for both shapes (the
+    cosine taper falls to one half at ``radius / 2``; for the Gaussian
+    ``radius`` is the FWHM). Pixels no larger than ``FWHM / oversample`` make
+    neighbouring cells overlap, so the map is fully sampled (Nyquist for the
+    default ``oversample=2``). Finer grids only add correlated cells.
+
+    Args:
+        radius: Taper scale, as passed to :func:`structure_function_skymap`.
+        taper: Taper shape.
+        oversample: Pixels per FWHM.
+
+    Returns:
+        A power of two.
+    """
+    Taper(taper)  # validate
+    target = radius.to(u.deg) / oversample
+    nside = 1
+    while pixel_size(nside) > target:
+        nside *= 2
+    return nside
+
+
 @dataclass(frozen=True, slots=True)
 class SkyMapResult:
     """Per-cell structure functions and fitted parameters on a HEALPix grid.
@@ -234,8 +266,8 @@ def structure_function_skymap(
     values: ArrayLike | u.Quantity,
     errors: ArrayLike | u.Quantity | None,
     coords: SkyCoord,
-    nside: int,
     radius: u.Quantity,
+    nside: int | Literal["auto"] = "auto",
     bins: int | u.Quantity = 8,
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
@@ -261,8 +293,8 @@ def structure_function_skymap(
         values: Measured values, plain or Quantity.
         errors: 1-sigma errors (same unit handling as ``values``) or ``None``.
         coords: Source positions (2D sky positions).
-        nside: HEALPix resolution.
         radius: Taper scale: zero point (cosine) or FWHM (Gaussian).
+        nside: HEALPix resolution, or ``"auto"`` for :func:`recommend_nside`.
         bins: Number of log bins, or explicit edges shared by all cells.
         min_sep: Lower edge for numeric ``bins`` (default: smallest separation
             in the catalogue).
@@ -308,6 +340,9 @@ def structure_function_skymap(
             u.deg,
         )
 
+    if nside == "auto":
+        nside = recommend_nside(radius, taper)
+    logger.info("Sky map: nside %d (%.2f deg pixels)", nside, pixel_size(nside).value)
     hp = HEALPix(nside=nside, order=order)
     targets = (
         np.arange(hp.npix) if pixels is None else np.asarray(pixels, dtype=np.intp)
@@ -338,17 +373,18 @@ def structure_function_skymap(
         for k in ("n_eff", "sf", "sf_err", "count", "sep", "par", "lo", "hi", "chi2")
     }
     sf_unit: u.UnitBase | None = None
+    n_eff_occupied: list[float] = []
     for k, (pix, idx_list) in enumerate(zip(targets, members, strict=True)):
         idx = np.asarray(idx_list, dtype=np.intp)
         if idx.size < 3:
             continue
-        d = 2.0 * np.arcsin(
-            np.clip(np.linalg.norm(pos.xyz[idx] - centres[k], axis=1) / 2.0, 0, 1)
-        )
-        w = taper_weights(d, radius_rad, taper) * vals.weights[idx]
+        chord = np.linalg.norm(pos.xyz[idx] - centres[k], axis=1)
+        distance = 2.0 * np.arcsin(np.clip(chord / 2.0, 0, 1))
+        w = taper_weights(distance, radius_rad, taper) * vals.weights[idx]
         keep = w > 0
         idx, w = idx[keep], w[keep]
         n_eff = float(w.sum() ** 2 / np.sum(w**2)) if w.size else 0.0
+        n_eff_occupied.append(n_eff)
         if n_eff < min_sources:
             continue
         v = _units.attach_unit(vals.values[idx], vals.unit)
@@ -397,6 +433,14 @@ def structure_function_skymap(
         out["chi2"].append(chi2)
 
     logger.info("Sky map: %d of %d cells computed", len(rows), targets.size)
+    if n_eff_occupied and np.median(n_eff_occupied) < min_sources:
+        warnings.warn(
+            f"the typical cell has {np.median(n_eff_occupied):.0f} effective sources, "
+            f"fewer than min_sources={min_sources:g}, so most cells were skipped. "
+            "Use a larger radius.",
+            StructureFunctionWarning,
+            stacklevel=2,
+        )
 
     def stack(key: str, width: int) -> FloatArray:
         if not out[key]:

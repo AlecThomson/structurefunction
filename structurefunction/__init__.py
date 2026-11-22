@@ -11,7 +11,11 @@ from structurefunction.options import (
     StencilOptions,
 )
 from structurefunction.results import SFResult
-from structurefunction.skymap import SkyMapResult, structure_function_skymap
+from structurefunction.skymap import (
+    SkyMapResult,
+    recommend_nside,
+    structure_function_skymap,
+)
 from structurefunction.types import (
     CrossPatchWeight,
     ErrorMethod,
@@ -39,6 +43,7 @@ __all__ = [
     "StructureFunctionWarning",
     "Taper",
     "__version__",
+    "recommend_nside",
     "structure_function",
     "structure_function_from_table",
     "structure_function_skymap",

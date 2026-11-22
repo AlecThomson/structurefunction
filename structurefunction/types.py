@@ -54,13 +54,16 @@ type StencilModeLike = StencilMode | Literal["exact", "binned"]
 class FitModel(StrEnum):
     """Models that can be fitted to a structure function."""
 
+    CONSTANT = "constant"
+    """A flat structure function: no structure on the scales fitted."""
     POWER_LAW = "power_law"
     BROKEN_POWER_LAW = "broken_power_law"
     SMOOTH_BROKEN_POWER_LAW = "smooth_broken_power_law"
 
 
 type FitModelLike = (
-    FitModel | Literal["power_law", "broken_power_law", "smooth_broken_power_law"]
+    FitModel
+    | Literal["constant", "power_law", "broken_power_law", "smooth_broken_power_law"]
 )
 
 

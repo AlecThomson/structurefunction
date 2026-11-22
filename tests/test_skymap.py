@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import astropy.units as u
@@ -10,11 +11,13 @@ from astropy_healpix import HEALPix
 
 from structurefunction import (
     SkyMapResult,
+    StructureFunctionWarning,
     Taper,
     structure_function,
     structure_function_skymap,
 )
-from structurefunction.skymap import taper_weights
+from structurefunction.skymap import pixel_size, recommend_nside, taper_weights
+from structurefunction.types import TaperLike
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,3 +118,38 @@ def test_cli_and_plot(tmp_path: Path) -> None:
     cli(args)
     assert SkyMapResult.read(out).pixels.size == 12
     assert png.stat().st_size > 0
+
+
+@pytest.mark.parametrize("radius_deg", [0.5, 3.0, 10.0, 40.0])
+@pytest.mark.parametrize("taper", ["cosine", "gaussian"])
+def test_recommend_nside_samples_the_taper(radius_deg: float, taper: TaperLike) -> None:
+    radius = radius_deg * u.deg
+    nside = recommend_nside(radius, taper)
+    assert nside & (nside - 1) == 0  # power of two
+    assert pixel_size(nside) <= radius / 2
+    if nside > 1:
+        assert pixel_size(nside // 2) > radius / 2
+
+
+def test_auto_nside_matches_explicit() -> None:
+    c, f, s = sky(20000, 5)
+    radius = 40 * u.deg
+    auto = structure_function_skymap(
+        f, s, c, radius=radius, bins=3, min_sep=2 * u.deg, fit_model=None, rng=0
+    )
+    explicit = structure_function_skymap(
+        f, s, c, radius=radius, nside=recommend_nside(radius), bins=3,
+        min_sep=2 * u.deg, fit_model=None, rng=0,
+    )  # fmt: skip
+    assert auto.nside == explicit.nside == recommend_nside(radius)
+    np.testing.assert_allclose(auto.map("sf", 1), explicit.map("sf", 1))
+
+
+def test_sparse_catalogue_warns() -> None:
+    c, f, s = sky(300, 6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", StructureFunctionWarning)
+        with pytest.raises(StructureFunctionWarning, match="effective sources"):
+            structure_function_skymap(
+                f, s, c, radius=5 * u.deg, bins=3, min_sep=0.5 * u.deg, fit_model=None
+            )

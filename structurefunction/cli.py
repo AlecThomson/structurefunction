@@ -60,7 +60,11 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
 
     sky = sub.add_parser("skymap", help="Apodised structure functions per HEALPix cell")
     _add_common(sky)
-    sky.add_argument("--nside", type=int, required=True)
+    sky.add_argument(
+        "--nside",
+        default="auto",
+        help="HEALPix nside, or 'auto' to sample the taper at twice per FWHM",
+    )
     sky.add_argument("--radius-deg", type=float, required=True, help="Taper scale")
     sky.add_argument("--taper", choices=[t.value for t in Taper], default="cosine")
     sky.add_argument("--bins", type=int, default=8)
@@ -118,7 +122,7 @@ def cli(args: Namespace | None = None) -> None:
         values=_column(table, args.value),
         errors=None if args.error is None else _column(table, args.error),
         coords=SkyCoord(angle(args.lon), angle(args.lat), frame=args.frame),
-        nside=args.nside,
+        nside="auto" if args.nside == "auto" else int(args.nside),
         radius=args.radius_deg * u.deg,
         bins=args.bins,
         min_sep=None if args.min_sep_deg is None else args.min_sep_deg * u.deg,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import astropy.units as u
 import numpy as np
 import pytest
@@ -8,10 +10,11 @@ from astropy.coordinates import SkyCoord
 from structurefunction import ErrorMethod, FitModel, SFResult, structure_function
 from structurefunction.fitting import (
     broken_power_law,
+    compare_models,
     fit_sf,
     power_law,
 )
-from structurefunction.types import FloatArray
+from structurefunction.types import FitModelLike, FloatArray
 
 TRUTH = np.array([0.5, 0.0, 1.6, 0.2])  # log10 A, log10 r_b [deg], slopes
 
@@ -92,8 +95,57 @@ def test_fit_needs_covariance() -> None:
         fit_sf(res)
 
 
+@pytest.mark.slow
 def test_nautilus_gives_evidence() -> None:
     pytest.importorskip("nautilus")
     fit = fit_sf(injected(TRUTH, 6), model="power_law", sampler="nautilus", rng=0)
     assert fit.log_evidence is not None
     assert np.isfinite(fit.log_evidence)
+
+
+def flat_result(level: float, seed: int) -> SFResult[FloatArray]:
+    """A flat structure function with a known 5% diagonal covariance."""
+    template = injected(TRUTH, seed)
+    rng = np.random.default_rng(seed)
+    cov = np.diag((0.05 * level) ** 2 * np.ones(template.sf.size))
+    sf = rng.multivariate_normal(np.full(template.sf.size, level), cov)
+    return replace(template, sf=sf, sf_err=np.sqrt(np.diag(cov)), cov=cov)
+
+
+def test_constant_recovers_flat_injection() -> None:
+    fit = fit_sf(flat_result(50.0, 7), model="constant", sampler="map")
+    assert abs(10 ** fit.map[0] - 50.0) < 2.0
+
+
+def test_compare_models_prefers_the_true_model() -> None:
+    models: tuple[FitModelLike, ...] = ("constant", "power_law", "broken_power_law")
+    wins = {"constant": 0, "broken_power_law": 0}
+    for seed in range(10):
+        for data, truth in (
+            (flat_result(50.0, 100 + seed), "constant"),
+            (injected(TRUTH, 200 + seed), "broken_power_law"),
+        ):
+            table, fits = compare_models(data, models=models)
+            assert list(table["bic"]) == sorted(table["bic"])
+            assert set(fits) == {FitModel(m) for m in models}
+            wins[truth] += table["model"][0] == truth
+    # BIC picks the right model most of the time, not every time.
+    assert wins["constant"] >= 7
+    assert wins["broken_power_law"] >= 9
+
+
+def test_one_parameter_evidence_matches_analytic() -> None:
+    # Flat data with a Gaussian likelihood: the evidence integral over the
+    # amplitude prior can be checked by direct quadrature in A itself.
+    data = flat_result(50.0, 10)
+    fit = fit_sf(data, model="constant", sampler="nautilus", likelihood="gaussian")
+    assert data.cov is not None
+    inv = np.linalg.inv(data.cov)
+    lo, hi = np.log10(np.abs(data.sf).min()) - 3, np.log10(np.abs(data.sf).max()) + 3
+    grid = np.linspace(lo, hi, 200001)
+    resid = data.sf[None, :] - 10 ** grid[:, None]
+    log_l = -0.5 * np.einsum("ij,jk,ik->i", resid, inv, resid)
+    peak = log_l.max()
+    expected = peak + np.log(np.trapezoid(np.exp(log_l - peak), grid) / (hi - lo))
+    assert fit.log_evidence is not None
+    assert abs(fit.log_evidence - expected) < 1e-3
