@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 def unit_vectors(lon_deg: FloatArray, lat_deg: FloatArray) -> FloatArray:
@@ -46,7 +46,7 @@ def sf2(
     return (wd - wb) / wsum, wb / wsum, cnt
 
 
-def sf3_exact(  # noqa: PLR0913
+def sf3_exact(
     xyz: FloatArray,
     f: FloatArray,
     sigma: FloatArray,

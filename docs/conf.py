@@ -14,6 +14,7 @@ extensions = [
     "myst_parser",
     "nbsphinx",
     "sphinx.ext.intersphinx",
+    "sphinxarg.ext",
     "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
@@ -38,3 +39,6 @@ intersphinx_mapping = {
 }
 
 always_document_param_types = True
+
+# Private kernels are excluded from the API docs, so their imports are unresolved.
+suppress_warnings = ["autoapi.python_import_resolution"]

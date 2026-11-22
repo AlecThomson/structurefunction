@@ -170,3 +170,9 @@ lmc/broken_power_law_3_point_result.json
 
 # hatch-vcs
 structurefunction/_version.py
+
+# docs
+docs/_build/
+docs/autoapi/
+docs/examples/*.ecsv
+docs/examples/*.fits

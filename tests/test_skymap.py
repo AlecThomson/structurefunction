@@ -91,12 +91,12 @@ def test_sparse_cells_are_skipped() -> None:
 
 
 def test_cli_and_plot(tmp_path: Path) -> None:
-    import matplotlib as mpl  # noqa: PLC0415
+    import matplotlib as mpl
 
     mpl.use("Agg")
-    from astropy.table import Table  # noqa: PLC0415
+    from astropy.table import Table
 
-    from structurefunction.cli import cli, get_parser  # noqa: PLC0415
+    from structurefunction.cli import cli, get_parser
 
     c, f, s = sky(20000, 4)
     t = Table({"ra": c.ra, "dec": c.dec, "rm": f, "rm_err": s})

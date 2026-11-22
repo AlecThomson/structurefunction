@@ -33,7 +33,7 @@ from structurefunction._kernels.common import (
 )
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray, IntArray
+    from structurefunction.types import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)

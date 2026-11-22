@@ -24,9 +24,9 @@ from structurefunction import _units
 from structurefunction.core import structure_function
 from structurefunction.fitting import fit_sf
 from structurefunction.geometry import separation_range
-from structurefunction.log import StructureFunctionWarning, logger
+from structurefunction.logging import StructureFunctionWarning, logger
 from structurefunction.options import AxisPositionErrors, CircularPositionError
-from structurefunction.typedefs import (
+from structurefunction.types import (
     ErrorMethod,
     FitModel,
     FitModelLike,
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
     from structurefunction.options import PositionErrors, StencilOptions
-    from structurefunction.typedefs import FloatArray, IntArray
+    from structurefunction.types import FloatArray, IntArray
 
 
 def taper_weights(
@@ -183,7 +183,7 @@ class SkyMapResult:
         )
         return t
 
-    def write(self, path: str | Path, overwrite: bool = False) -> None:  # noqa: FBT001, FBT002
+    def write(self, path: str | Path, overwrite: bool = False) -> None:
         """Write to any astropy table format (ECSV or FITS)."""
         self.to_table().write(path, overwrite=overwrite)
 
@@ -230,7 +230,7 @@ class SkyMapResult:
         )
 
 
-def structure_function_skymap(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def structure_function_skymap(
     values: ArrayLike | u.Quantity,
     errors: ArrayLike | u.Quantity | None,
     coords: SkyCoord,
@@ -340,7 +340,7 @@ def structure_function_skymap(  # noqa: C901, PLR0912, PLR0913, PLR0915
     sf_unit: u.UnitBase | None = None
     for k, (pix, idx_list) in enumerate(zip(targets, members, strict=True)):
         idx = np.asarray(idx_list, dtype=np.intp)
-        if idx.size < 3:  # noqa: PLR2004
+        if idx.size < 3:
             continue
         d = 2.0 * np.arcsin(
             np.clip(np.linalg.norm(pos.xyz[idx] - centres[k], axis=1) / 2.0, 0, 1)

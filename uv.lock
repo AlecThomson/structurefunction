@@ -2716,6 +2716,21 @@ wheels = [
 ]
 
 [[package]]
+name = "sphinx-argparse"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "docutils", version = "0.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/3d/6caa961384aa9198ecbe23d089ef846533a3413d180173a7001a054cfaab/sphinx_argparse-0.6.1.tar.gz", hash = "sha256:f8be167aedf5670bd7c812ef515968ff4717c63cfc9cb4df5f34b54fd5649c37", size = 38591, upload-time = "2026-08-21T07:38:26.571Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/2a/6f4b73c1086822852eb9a2a905cfe377daafa7ab2c3196d8854dc99d1616/sphinx_argparse-0.6.1-py3-none-any.whl", hash = "sha256:5b4c5e8f9194be4a48f0b3918eb5c32434c400e08f92a64fb5343ee282158c4a", size = 18141, upload-time = "2026-08-21T07:38:25.225Z" },
+]
+
+[[package]]
 name = "sphinx-autoapi"
 version = "3.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2887,6 +2902,7 @@ docs = [
     { name = "nbsphinx" },
     { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx-argparse" },
     { name = "sphinx-autoapi" },
     { name = "sphinx-autodoc-typehints" },
     { name = "sphinx-copybutton" },
@@ -2938,6 +2954,7 @@ docs = [
     { name = "myst-parser", specifier = ">=4" },
     { name = "nbsphinx", specifier = ">=0.9.6" },
     { name = "sphinx", specifier = ">=7" },
+    { name = "sphinx-argparse", specifier = ">=0.5" },
     { name = "sphinx-autoapi", specifier = ">=3.3" },
     { name = "sphinx-autodoc-typehints", specifier = ">=2" },
     { name = "sphinx-copybutton", specifier = ">=0.5" },

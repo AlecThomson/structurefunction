@@ -15,7 +15,7 @@ from structurefunction._kernels.common import (
 )
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray, IntArray
+    from structurefunction.types import FloatArray, IntArray
 
 
 @numba.njit(cache=True, inline="always")

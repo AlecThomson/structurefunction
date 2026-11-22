@@ -15,8 +15,8 @@ import astropy.units as u
 import numpy as np
 from scipy.optimize import least_squares, minimize
 
-from structurefunction.log import logger
-from structurefunction.typedefs import (
+from structurefunction.logging import logger
+from structurefunction.types import (
     ErrorMethod,
     FitModel,
     FitModelLike,
@@ -126,7 +126,7 @@ def _model_fn(
     return smooth_broken_power_law
 
 
-def fit_sf(  # noqa: PLR0913, PLR0915, C901
+def fit_sf(
     result: SFResult[FloatArray] | SFResult[u.Quantity],
     model: FitModelLike = FitModel.BROKEN_POWER_LAW,
     sampler: SamplerLike = Sampler.EMCEE,
@@ -260,7 +260,7 @@ def fit_sf(  # noqa: PLR0913, PLR0915, C901
         cov_theta = _laplace(log_post, theta_map)
         samples = gen.multivariate_normal(theta_map, cov_theta, 20000)
     elif sampler == Sampler.EMCEE:
-        import emcee  # noqa: PLC0415
+        import emcee
 
         scale = 1e-3 * (hi - lo)
         p0 = np.clip(
@@ -275,8 +275,8 @@ def fit_sf(  # noqa: PLR0913, PLR0915, C901
         samples = ens.get_chain(discard=n_burn, flat=True)
     else:
         try:
-            from nautilus import Prior  # noqa: PLC0415
-            from nautilus import Sampler as NautilusSampler  # noqa: PLC0415
+            from nautilus import Prior
+            from nautilus import Sampler as NautilusSampler
         except ImportError as err:
             msg = "sampler='nautilus' needs the 'evidence' extra"
             raise ImportError(msg) from err

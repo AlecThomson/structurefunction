@@ -8,7 +8,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 def tangent_basis(lon: FloatArray, lat: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -20,14 +20,14 @@ def tangent_basis(lon: FloatArray, lat: FloatArray) -> tuple[FloatArray, FloatAr
     return east, north
 
 
-def chord_to_separation(chord: FloatArray, angular: bool) -> FloatArray:  # noqa: FBT001
+def chord_to_separation(chord: FloatArray, angular: bool) -> FloatArray:
     """Vectorised chord length to separation."""
     if not angular:
         return chord
     return 2.0 * np.arcsin(np.clip(chord * 0.5, 0.0, 1.0))
 
 
-def separation_range(xyz: FloatArray, angular: bool) -> tuple[float, float]:  # noqa: FBT001
+def separation_range(xyz: FloatArray, angular: bool) -> tuple[float, float]:
     """Smallest non-zero and (near-)largest pair separation.
 
     The minimum is exact (nearest neighbours via a KD-tree). The maximum uses a

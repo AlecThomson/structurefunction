@@ -19,12 +19,12 @@ from structurefunction.options import (
     CircularPositionError,
     PositionErrors,
 )
-from structurefunction.typedefs import RAErrorConvention
+from structurefunction.types import RAErrorConvention
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 @dataclass(frozen=True, slots=True)

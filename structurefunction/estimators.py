@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from structurefunction._kernels.common import Kind, Stat
-from structurefunction.typedefs import CrossPatchWeight, ErrorMethod
+from structurefunction.types import CrossPatchWeight, ErrorMethod
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 @dataclass(frozen=True, slots=True)

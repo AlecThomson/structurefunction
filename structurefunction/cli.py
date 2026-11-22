@@ -16,7 +16,7 @@ from astropy.table import Table
 from structurefunction.core import structure_function_from_table
 from structurefunction.options import StencilOptions
 from structurefunction.skymap import structure_function_skymap
-from structurefunction.typedefs import ErrorMethod, FitModel, StencilMode, Taper
+from structurefunction.types import ErrorMethod, FitModel, StencilMode, Taper
 
 
 def _add_common(parser: ArgumentParser) -> None:
@@ -105,7 +105,7 @@ def cli(args: Namespace | None = None) -> None:
         )
         res.write(args.output, overwrite=args.overwrite)
         if args.plot is not None:
-            from structurefunction.plotting import plot_sf  # noqa: PLC0415
+            from structurefunction.plotting import plot_sf
 
             plot_sf(res).savefig(args.plot)
         return
@@ -133,7 +133,7 @@ def cli(args: Namespace | None = None) -> None:
     )
     sky.write(args.output, overwrite=args.overwrite)
     if args.plot is not None:
-        from structurefunction.plotting import plot_skymap  # noqa: PLC0415
+        from structurefunction.plotting import plot_skymap
 
         plot_skymap(sky, args.plot_quantity).savefig(args.plot)
 

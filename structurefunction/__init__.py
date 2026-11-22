@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from structurefunction._version import version as __version__
 from structurefunction.core import structure_function, structure_function_from_table
-from structurefunction.log import StructureFunctionWarning
+from structurefunction.logging import StructureFunctionWarning
 from structurefunction.options import (
     AxisPositionErrors,
     CircularPositionError,
@@ -12,7 +12,7 @@ from structurefunction.options import (
 )
 from structurefunction.results import SFResult
 from structurefunction.skymap import SkyMapResult, structure_function_skymap
-from structurefunction.typedefs import (
+from structurefunction.types import (
     CrossPatchWeight,
     ErrorMethod,
     FitModel,

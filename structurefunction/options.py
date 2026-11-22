@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from structurefunction.typedefs import (
+from structurefunction.types import (
     RAErrorConvention,
     RAErrorConventionLike,
     StencilMode,
@@ -36,7 +36,7 @@ class StencilOptions:
 
     def __post_init__(self) -> None:
         """Validate tolerances and normalise the mode."""
-        if not 0.0 < self.angle_tol_deg < 90.0:  # noqa: PLR2004
+        if not 0.0 < self.angle_tol_deg < 90.0:
             msg = f"angle_tol_deg must be in (0, 90), got {self.angle_tol_deg}"
             raise ValueError(msg)
         if not 0.0 < self.sep_tol < 1.0:

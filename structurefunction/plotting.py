@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from structurefunction.fitting import FitResult
     from structurefunction.results import SFResult
     from structurefunction.skymap import SkyMapResult
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 def plot_sf(
@@ -28,8 +28,8 @@ def plot_sf(
 
     Unreliable bins (``count < min_count``) are drawn hollow.
     """
-    import matplotlib.pyplot as plt  # noqa: PLC0415
-    from matplotlib.figure import Figure  # noqa: PLC0415
+    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
 
     if ax is None:
         fig, ax = plt.subplots()
@@ -53,7 +53,7 @@ def plot_sf(
         mfc="none",
         color="k",
         alpha=0.5,
-        label=f"< {result.min_count} {'pairs' if result.n_point == 2 else 'triplets'}",  # noqa: PLR2004
+        label=f"< {result.min_count} {'pairs' if result.n_point == 2 else 'triplets'}",
     )
     sat = float(u.Quantity(result.saturation).value if unit else result.saturation)
     ax.axhline(sat, ls="--", color="0.5", label=f"{result.n_point}-point plateau")
@@ -74,7 +74,7 @@ def plot_sf(
     return fig
 
 
-def plot_skymap(  # noqa: PLR0913
+def plot_skymap(
     result: SkyMapResult,
     name: str,
     bin_index: int | None = None,
@@ -86,9 +86,9 @@ def plot_skymap(  # noqa: PLR0913
 
     Longitude increases to the left, as on the sky.
     """
-    import matplotlib.pyplot as plt  # noqa: PLC0415
-    from astropy_healpix import HEALPix  # noqa: PLC0415
-    from matplotlib.figure import Figure  # noqa: PLC0415
+    import matplotlib.pyplot as plt
+    from astropy_healpix import HEALPix
+    from matplotlib.figure import Figure
 
     values = result.map(name, bin_index)
     hp = HEALPix(nside=result.nside, order=result.order)

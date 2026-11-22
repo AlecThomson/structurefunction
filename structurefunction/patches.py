@@ -11,23 +11,19 @@ from scipy.cluster.vq import kmeans2
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
-    from structurefunction.typedefs import FloatArray, IntArray
+    from structurefunction.types import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)
 class Patches:
-    """Patch labels and summary geometry.
-
-    Attributes:
-        labels: Patch index of each source, in ``[0, n_patch)``.
-        n_patch: Number of patches.
-        size: Typical patch diameter (internal separation units): twice the
-            median over patches of the RMS member distance from the centre.
-    """
+    """Patch labels and summary geometry."""
 
     labels: IntArray
+    """Patch index of each source, in ``[0, n_patch)``."""
     n_patch: int
+    """Number of patches."""
     size: float
+    """Typical patch diameter (chord units): twice the median RMS member distance."""
 
 
 def make_patches(

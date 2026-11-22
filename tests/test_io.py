@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from astropy.table import Table
 
-from structurefunction import SFResult, structure_function_from_table, typedefs
+from structurefunction import SFResult, structure_function_from_table, types
 from structurefunction.cli import cli, get_parser
 
 if typing.TYPE_CHECKING:
@@ -68,13 +68,13 @@ def test_cli_writes_table(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("enum", "alias"),
     [
-        (typedefs.ErrorMethod, typedefs.ErrorMethodLike),
-        (typedefs.CrossPatchWeight, typedefs.CrossPatchWeightLike),
-        (typedefs.StencilMode, typedefs.StencilModeLike),
-        (typedefs.FitModel, typedefs.FitModelLike),
-        (typedefs.Sampler, typedefs.SamplerLike),
-        (typedefs.Likelihood, typedefs.LikelihoodLike),
-        (typedefs.RAErrorConvention, typedefs.RAErrorConventionLike),
+        (types.ErrorMethod, types.ErrorMethodLike),
+        (types.CrossPatchWeight, types.CrossPatchWeightLike),
+        (types.StencilMode, types.StencilModeLike),
+        (types.FitModel, types.FitModelLike),
+        (types.Sampler, types.SamplerLike),
+        (types.Likelihood, types.LikelihoodLike),
+        (types.RAErrorConvention, types.RAErrorConventionLike),
     ],
 )
 def test_string_aliases_match_enums(

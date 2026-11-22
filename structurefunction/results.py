@@ -9,7 +9,7 @@ import astropy.units as u
 import numpy as np
 from astropy.table import QTable, Table
 
-from structurefunction.typedefs import ErrorMethod, FloatArray
+from structurefunction.types import ErrorMethod, FloatArray
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,7 +89,7 @@ class SFResult[V: (FloatArray, u.Quantity)]:
         )
         return t
 
-    def write(self, path: str | Path, overwrite: bool = False) -> None:  # noqa: FBT001, FBT002
+    def write(self, path: str | Path, overwrite: bool = False) -> None:
         """Write to any astropy-writable table format (ECSV recommended)."""
         self.to_table().write(path, overwrite=overwrite)
 

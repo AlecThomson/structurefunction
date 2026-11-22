@@ -34,7 +34,7 @@ from structurefunction._kernels.common import (
 )
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray, IntArray
+    from structurefunction.types import FloatArray, IntArray
 
 
 @numba.njit(cache=True)
@@ -159,7 +159,7 @@ def exact_triplets(
                 roots,
                 buf,
             )
-            if k < 2:  # noqa: PLR2004
+            if k < 2:
                 continue
             idx = buf[:k].copy()
             bear = np.empty(k)

@@ -22,11 +22,11 @@ from structurefunction.geometry import (
     separation_range,
     tangent_basis,
 )
-from structurefunction.log import StructureFunctionWarning, logger
+from structurefunction.logging import StructureFunctionWarning, logger
 from structurefunction.options import StencilOptions
 from structurefunction.patches import make_patches
 from structurefunction.results import SFResult
-from structurefunction.typedefs import (
+from structurefunction.types import (
     CrossPatchWeight,
     CrossPatchWeightLike,
     ErrorMethod,
@@ -110,7 +110,7 @@ def structure_function(
 ) -> SFResult[u.Quantity] | SFResult[FloatArray]: ...
 
 
-def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
+def structure_function(
     values: ArrayLike | u.Quantity,
     errors: ArrayLike | u.Quantity | None,
     coords: SkyCoord,
@@ -184,7 +184,7 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
     if pos.xyz.shape[0] != n:
         msg = f"{n} values but {pos.xyz.shape[0]} coordinates"
         raise ValueError(msg)
-    if n_point == 3 and not pos.angular:  # noqa: PLR2004
+    if n_point == 3 and not pos.angular:
         msg = "3-point stencils are only implemented for sky (2D) positions"
         raise NotImplementedError(msg)
 
@@ -218,7 +218,7 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
         n_bins,
         patch_info.n_patch,
     )
-    if n_point == 2:  # noqa: PLR2004
+    if n_point == 2:
         summed = dual_tree_pairs(
             tree.start,
             tree.end,
@@ -350,7 +350,7 @@ def structure_function(  # noqa: PLR0913, PLR0915, C901, PLR0912
     )
 
 
-def structure_function_from_table(  # noqa: PLR0913
+def structure_function_from_table(
     table: Table,
     value: str,
     error: str | None,
@@ -370,7 +370,7 @@ def structure_function_from_table(  # noqa: PLR0913
     Columns without units are used as plain arrays; coordinate columns
     without units are taken to be in degrees.
     """
-    from astropy.coordinates import SkyCoord  # noqa: PLC0415
+    from astropy.coordinates import SkyCoord
 
     def col(name: str) -> u.Quantity | FloatArray:
         c = table[name]
@@ -405,7 +405,7 @@ def _edges(
 ) -> FloatArray:
     if isinstance(bins, u.Quantity) or np.ndim(bins) > 0:
         edges = _units.separation_array(bins, pos)
-        if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):  # noqa: PLR2004
+        if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):
             msg = "bin edges must be a strictly increasing 1D array"
             raise ValueError(msg)
         return edges
@@ -438,7 +438,7 @@ def _sub_edges(edges: FloatArray, sep_tol: float) -> tuple[FloatArray, IntArray]
     return np.concatenate(parts), np.asarray(owner, dtype=np.intp)
 
 
-def _check_resampling(  # noqa: PLR0913
+def _check_resampling(
     method: ErrorMethod,
     n_patch: int,
     n_bins: int,

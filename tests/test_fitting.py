@@ -11,12 +11,12 @@ from structurefunction.fitting import (
     fit_sf,
     power_law,
 )
-from structurefunction.typedefs import FloatArray
+from structurefunction.types import FloatArray
 
 TRUTH = np.array([0.5, 0.0, 1.6, 0.2])  # log10 A, log10 r_b [deg], slopes
 
 
-def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult[FloatArray]:  # noqa: FBT001, FBT002
+def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult[FloatArray]:
     """An SFResult drawn from a known model with a known 5% covariance."""
     rng = np.random.default_rng(seed)
     edges = np.geomspace(0.05, 20, 15)

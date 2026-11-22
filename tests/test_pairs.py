@@ -13,7 +13,7 @@ from conftest import Catalogue, make_catalogue
 from reference import sf2, unit_vectors
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 EDGES = np.geomspace(0.1, 6.0, 9) * u.deg
 

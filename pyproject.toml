@@ -71,6 +71,7 @@ docs = [
   "myst-parser>=4",
   "nbsphinx>=0.9.6",
   "sphinx>=7",
+  "sphinx-argparse>=0.5",
   "sphinx-autoapi>=3.3",
   "sphinx-autodoc-typehints>=2",
   "sphinx-copybutton>=0.5",
@@ -85,12 +86,31 @@ line-length = 88
 src = [ "structurefunction", "tests" ]
 lint.select = [ "ALL" ]
 lint.ignore = [
-  "COM812",  # conflicts with the formatter
-  "CPY001",  # licence is declared once (LICENSE, pyproject); no per-file headers
-  "D203",    # conflicts with D211
-  "D213",    # conflicts with D212
-  "ISC001",  # conflicts with the formatter
-  "PLR0917", # conflicts with project style: no keyword-only `*` markers
+  # Noise
+  "A005",    # module names like types.py/logging.py are fine with absolute imports
+  "C901",    # complexity counts: numba kernels are deliberately flat
+  # Conflicts (with each other or with the formatter)
+  "COM812",
+  "CPY001",  # licence lives in LICENSE/pyproject, not per-file headers
+  "D203",
+  "D213",
+  "EM101",   # allow raise ValueError("literal")
+  "EM102",   # allow raise ValueError(f"...")
+  "FBT001",  # boolean positional parameters
+  "FBT002",  # boolean default parameters
+  "FBT003",  # boolean positional arguments (numba calls)
+  "ISC001",
+  "PLC0415", # lazy imports of optional dependencies are intentional
+  "PLR0911", # too many returns
+  "PLR0912", # too many branches
+  "PLR0913", # too many arguments: scientific APIs take many options
+  "PLR0915", # too many statements
+  "PLR0917", # too many positional args: house style avoids keyword-only `*`
+  "PLR2004", # magic values: physical constants and thresholds read better inline
+  "TC001",   # TYPE_CHECKING import shuffling is churn with postponed annotations
+  "TC002",
+  "TC003",
+  "TRY003",  # long messages in exception constructors are fine
 ]
 lint.per-file-ignores."benchmarks/**" = [
   "INP001", # scripts, not a package
@@ -98,27 +118,15 @@ lint.per-file-ignores."benchmarks/**" = [
 ]
 lint.per-file-ignores."docs/**" = [ "INP001" ]
 lint.per-file-ignores."docs/examples/*.ipynb" = [
-  "D100",    # notebooks have no module docstring
-  "E402",    # imports live in the cell where they are first needed
-  "PLR2004", # example checks compare against literal thresholds
-  "S101",    # self-checking examples assert their results
-  "T201",    # examples print results
-]
-lint.per-file-ignores."structurefunction/_kernels/**" = [
-  # numba hot loops are kept flat: splitting them adds call overhead and
-  # prevents fusion, and they take many array arguments by design.
-  "C901",
-  "FBT001",
-  "FBT003",
-  "PLR0912",
-  "PLR0913",
-  "PLR0915",
+  "D100", # notebooks have no module docstring
+  "E402", # imports live in the cell where they are first needed
+  "S101", # self-checking examples assert their results
+  "T201", # examples print results
 ]
 lint.per-file-ignores."tests/**" = [
-  "D",       # test names are the documentation
-  "INP001",  # tests are not a package
-  "PLR2004", # magic numbers are expected values
-  "S101",    # pytest uses assert
+  "D",      # test names are the documentation
+  "INP001", # tests are not a package
+  "S101",   # pytest uses assert
 ]
 lint.isort.known-first-party = [ "structurefunction" ]
 lint.isort.known-local-folder = [ "conftest", "reference" ]

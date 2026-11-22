@@ -24,7 +24,7 @@ import numba
 import numpy as np
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 class Kind(IntEnum):

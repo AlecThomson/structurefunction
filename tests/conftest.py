@@ -9,7 +9,7 @@ import pytest
 from astropy.coordinates import SkyCoord
 
 if TYPE_CHECKING:
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 
 @dataclass(frozen=True)

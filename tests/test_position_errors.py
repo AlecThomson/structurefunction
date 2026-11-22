@@ -22,7 +22,7 @@ from conftest import make_catalogue
 
 if TYPE_CHECKING:
     from structurefunction.options import PositionErrors
-    from structurefunction.typedefs import FloatArray
+    from structurefunction.types import FloatArray
 
 EDGES = np.geomspace(0.05, 2.0, 7) * u.deg
 
