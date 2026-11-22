@@ -36,7 +36,7 @@ def slope(
         coords,  # type: ignore[arg-type]
         n_point=3,
         bins=edges,
-        regions=1,
+        jk_regions=1,
         error_method="none",
         stencil=StencilOptions(angle_tol_deg=angle_tol, sep_tol=sep_tol, mode=mode),  # type: ignore[arg-type]
     )

@@ -53,7 +53,7 @@ def structure_function(
     min_sep: u.Quantity | None = None,
     max_sep: u.Quantity | None = None,
     weights: ArrayLike | None = None,
-    regions: int | ArrayLike = 64,
+    jk_regions: int | ArrayLike = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
     cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
     n_boot: int = 1000,
@@ -84,7 +84,7 @@ def structure_function(
             separation.
         weights: Optional non-negative per-source weights. A pair is weighted
             by the product of its members' weights.
-        regions: Number of jackknife regions (found by k-means on positions),
+        jk_regions: Number of jackknife regions (found by k-means on positions),
             or a region label per source. Use several times as many regions as
             bins, each larger than the separations of interest.
         error_method: ``jackknife`` (default), ``bootstrap`` or ``none``.
@@ -127,7 +127,7 @@ def structure_function(
 
     edges = _edges(bins, min_sep, max_sep, pos)
     n_bins = edges.size - 1
-    region_info = make_regions(pos.xyz, regions, gen)
+    region_info = make_regions(pos.xyz, jk_regions, gen)
     labels = region_info.labels
 
     error_var = vals.errors**2
@@ -227,7 +227,7 @@ def structure_function_from_table(
     frame: str = "icrs",
     n_point: Literal[2, 3] = 2,
     bins: int | u.Quantity = 10,
-    regions: int = 64,
+    jk_regions: int = 64,
     error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
     pos_errors: PositionErrors | None = None,
     stencil: StencilOptions | None = None,
@@ -257,7 +257,7 @@ def structure_function_from_table(
         coords=coords,
         n_point=n_point,
         bins=bins,
-        regions=regions,
+        jk_regions=jk_regions,
         error_method=error_method,
         pos_errors=pos_errors,
         stencil=stencil,

@@ -25,7 +25,7 @@ def mao2010() -> Table:
 
 def test_result_round_trips_through_ecsv(tmp_path: Path) -> None:
     res = structure_function_from_table(
-        mao2010(), "rm", "rm_err", bins=6, regions=20, rng=0
+        mao2010(), "rm", "rm_err", bins=6, jk_regions=20, rng=0
     )
     out = tmp_path / "sf.ecsv"
     write(res, out)
@@ -54,7 +54,7 @@ def test_cli_writes_table(tmp_path: Path) -> None:
             "rm_err",
             "--bins",
             "5",
-            "--regions",
+            "--jk-regions",
             "16",
             "--seed",
             "1",

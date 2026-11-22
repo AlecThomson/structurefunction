@@ -202,7 +202,7 @@ def structure_function_skymap(
     order: Literal["ring", "nested"] = "ring",
     weights: ArrayLike | None = None,
     n_point: Literal[2, 3] = 2,
-    regions: int = 16,
+    jk_regions: int = 16,
     min_sources: float = 30.0,
     fit_model: FitModelLike | None = FitModel.BROKEN_POWER_LAW,
     pixels: ArrayLike | None = None,
@@ -230,7 +230,7 @@ def structure_function_skymap(
         order: HEALPix pixel ordering.
         weights: Optional per-source weights, multiplied by the taper.
         n_point: Stencil size.
-        regions: k-means regions per cell for the jackknife.
+        jk_regions: Jackknife regions per cell (k-means on the cell's sources).
         min_sources: Skip cells with fewer effective sources.
         fit_model: Model to fit per cell (MAP), or ``None``.
         pixels: Only compute these cells (default: all with enough sources).
@@ -325,7 +325,7 @@ def structure_function_skymap(
                 n_point=n_point,
                 bins=edges_q,
                 weights=w,
-                regions=min(regions, max(int(n_eff) // 10, 2)),
+                jk_regions=min(jk_regions, max(int(n_eff) // 10, 2)),
                 bin_tolerance=bin_tolerance,
                 pos_errors=_subset_pos_errors(pos_errors, idx),
                 stencil=stencil,

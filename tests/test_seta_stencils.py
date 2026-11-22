@@ -28,7 +28,7 @@ def slope(beta: float, n_point: Literal[2, 3]) -> float:
         coords,
         n_point=n_point,
         bins=edges,
-        regions=1,
+        jk_regions=1,
         error_method="none",
         stencil=StencilOptions(angle_tol_deg=5.0, sep_tol=0.05, mode="exact"),
     )

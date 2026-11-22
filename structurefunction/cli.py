@@ -53,7 +53,9 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     sf = sub.add_parser("sf", help="One structure function for the whole table")
     _add_common(sf)
     sf.add_argument("--bins", type=int, default=10, help="Number of log bins")
-    sf.add_argument("--regions", type=int, default=64)
+    sf.add_argument(
+        "--jk-regions", type=int, default=64, help="Number of jackknife regions"
+    )
     sf.add_argument(
         "--error-method", choices=[m.value for m in ErrorMethod], default="jackknife"
     )
@@ -70,7 +72,9 @@ def get_parser(parser: ArgumentParser | None = None) -> ArgumentParser:
     sky.add_argument("--bins", type=int, default=8)
     sky.add_argument("--min-sep-deg", type=float, default=None)
     sky.add_argument("--max-sep-deg", type=float, default=None)
-    sky.add_argument("--regions", type=int, default=16, help="Regions per cell")
+    sky.add_argument(
+        "--jk-regions", type=int, default=16, help="Jackknife regions per cell"
+    )
     sky.add_argument("--min-sources", type=float, default=30.0)
     sky.add_argument(
         "--fit-model",
@@ -102,7 +106,7 @@ def cli(args: Namespace | None = None) -> None:
             frame=args.frame,
             n_point=args.n_point,
             bins=args.bins,
-            regions=args.regions,
+            jk_regions=args.jk_regions,
             error_method=args.error_method,
             stencil=stencil,
             rng=args.seed,
@@ -129,7 +133,7 @@ def cli(args: Namespace | None = None) -> None:
         max_sep=None if args.max_sep_deg is None else args.max_sep_deg * u.deg,
         taper=args.taper,
         n_point=args.n_point,
-        regions=args.regions,
+        jk_regions=args.jk_regions,
         min_sources=args.min_sources,
         fit_model=None if args.fit_model == "none" else args.fit_model,
         stencil=stencil,

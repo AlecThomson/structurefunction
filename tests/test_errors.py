@@ -22,7 +22,7 @@ def test_jackknife_samples_are_leave_one_out() -> None:
         cat.coords,
         bins=EDGES,
         weights=cat.weights,
-        regions=labels,
+        jk_regions=labels,
         bin_tolerance=0.0,
     )
     loo = []
@@ -34,7 +34,7 @@ def test_jackknife_samples_are_leave_one_out() -> None:
             cat.coords[keep],
             bins=EDGES,
             weights=cat.weights[keep],
-            regions=labels[keep],
+            jk_regions=labels[keep],
             bin_tolerance=0.0,
             error_method="none",
         )
@@ -54,7 +54,7 @@ def test_bootstrap_is_reproducible() -> None:
             cat.errors,
             cat.coords,
             bins=EDGES,
-            regions=16,
+            jk_regions=16,
             error_method="bootstrap",
             n_boot=200,
             rng=5,
@@ -69,12 +69,14 @@ def test_guard_rail_warns_for_few_regions() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", StructureFunctionWarning)
         with pytest.raises(StructureFunctionWarning, match="regions"):
-            structure_function(cat.values, cat.errors, cat.coords, bins=10, regions=4)
+            structure_function(
+                cat.values, cat.errors, cat.coords, bins=10, jk_regions=4
+            )
 
 
 def test_reliable_flags_low_counts() -> None:
     cat = make_catalogue(200, seed=24)
     res = structure_function(
-        cat.values, cat.errors, cat.coords, bins=EDGES, regions=4, min_count=50
+        cat.values, cat.errors, cat.coords, bins=EDGES, jk_regions=4, min_count=50
     )
     np.testing.assert_array_equal(res.reliable, res.count >= 50)

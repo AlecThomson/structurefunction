@@ -55,7 +55,7 @@ def test_cell_matches_direct_weighted_call() -> None:
         nside=2,
         radius=15 * u.deg,
         bins=edges,
-        regions=8,
+        jk_regions=8,
         fit_model=None,
         pixels=[5],
         bin_tolerance=0.0,
@@ -72,7 +72,7 @@ def test_cell_matches_direct_weighted_call() -> None:
         c[keep],
         bins=edges,
         weights=w[keep],
-        regions=8,
+        jk_regions=8,
         bin_tolerance=0.0,
         rng=0,
     )
@@ -90,7 +90,7 @@ def test_white_noise_map_is_flat(tmp_path: Path) -> None:
         radius=40 * u.deg,
         bins=4,
         min_sep=2 * u.deg,
-        regions=16,
+        jk_regions=16,
         fit_model="power_law",
         rng=1,
     )
