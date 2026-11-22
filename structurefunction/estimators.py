@@ -36,10 +36,10 @@ class Estimate:
 
 def _sf_from_totals(tot: FloatArray) -> tuple[FloatArray, FloatArray]:
     """``(sf, bias)`` from totals of shape ``(..., n_bin, n_stat)``."""
-    w = tot[..., Stat.W]
+    w = tot[..., Stat.WEIGHT]
     with np.errstate(invalid="ignore", divide="ignore"):
-        bias = np.where(w > 0, tot[..., Stat.WB] / w, np.nan)
-        sf = np.where(w > 0, tot[..., Stat.WD] / w, np.nan) - bias
+        bias = np.where(w > 0, tot[..., Stat.ERROR_BIAS] / w, np.nan)
+        sf = np.where(w > 0, tot[..., Stat.SQUARED_DIFF] / w, np.nan) - bias
     return sf, bias
 
 
@@ -65,10 +65,10 @@ def estimate(
     mark = acc[Kind.MARK]  # (bin, patch, stat)
     total = mark.sum(axis=1)  # (bin, stat)
     sf, bias = _sf_from_totals(total)
-    w = total[:, Stat.W]
+    w = total[:, Stat.WEIGHT]
     with np.errstate(invalid="ignore", divide="ignore"):
-        sep = np.where(w > 0, total[:, Stat.WR] / w, np.nan)
-    count = total[:, Stat.N]
+        sep = np.where(w > 0, total[:, Stat.SEPARATION] / w, np.nan)
+    count = total[:, Stat.COUNT]
     n_patch = acc.shape[2]
 
     cov: FloatArray | None = None

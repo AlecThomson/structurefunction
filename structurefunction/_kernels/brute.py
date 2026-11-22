@@ -1,122 +1,120 @@
-"""Exact O(N^2) two-point kernel (reference and small-N path)."""
+"""Exact two-point sums over individual source pairs."""
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
 
 from structurefunction._kernels.common import (
-    chord_to_sep,
-    projected_variance,
-    soft_bins,
+    Contribution,
+    add_pair,
+    chord_to_separation,
+    distance,
+    find_bin,
+    gaussian_bin_fraction,
+    gaussian_bin_range,
+    projected_position_var,
 )
-
-if TYPE_CHECKING:
-    from structurefunction.types import FloatArray, IntArray
+from structurefunction._kernels.containers import Binning, Sources
+from structurefunction.types import FloatArray
 
 
 @numba.njit(cache=True, inline="always")
-def pair_into(
+def add_pair_to_bins(
     acc: FloatArray,
     slot: int,
-    i: int,
-    j: int,
-    xyz: FloatArray,
-    f: FloatArray,
-    sig2: FloatArray,
-    w: FloatArray,
-    patch: IntArray,
-    edges: FloatArray,
-    angular: bool,
-    east: FloatArray,
-    north: FloatArray,
-    pcov: FloatArray,
-    use_pos: bool,
+    separation: float,
+    sigma: float,
+    bins: Binning,
+    patch_a: int,
+    patch_b: int,
+    contribution: Contribution,
 ) -> None:
-    """Accumulate the exact contribution of source pair ``(i, j)``."""
-    dx = xyz[i, 0] - xyz[j, 0]
-    dy = xyz[i, 1] - xyz[j, 1]
-    dz = xyz[i, 2] - xyz[j, 2]
-    sep = chord_to_sep(math.sqrt(dx * dx + dy * dy + dz * dz), angular)
+    """Add a pair to its bin, or spread it over bins if its separation is uncertain.
+
+    ``sigma`` is the 1-sigma uncertainty of the separation (0 for none).
+    Probability falling outside the binned range is dropped.
+    """
+    if sigma <= 0.0:
+        bin_index = find_bin(separation, bins.edges)
+        if bin_index >= 0:
+            add_pair(acc, slot, bin_index, patch_a, patch_b, contribution, 1.0)
+        return
+    first, last = gaussian_bin_range(separation, sigma, bins.edges)
+    if first < 0:
+        return
+    for bin_index in range(first, last + 1):
+        fraction = gaussian_bin_fraction(separation, sigma, bins.edges, bin_index)
+        if fraction > 0.0:
+            add_pair(acc, slot, bin_index, patch_a, patch_b, contribution, fraction)
+
+
+@numba.njit(cache=True, inline="always")
+def position_var_towards(source: int, other: int, sources: Sources) -> float:
+    """Positional variance of ``source`` along the direction to ``other``."""
+    return projected_position_var(
+        sources.positions,
+        source,
+        other,
+        sources.east,
+        sources.north,
+        sources.position_cov,
+    )
+
+
+@numba.njit(cache=True, inline="always")
+def add_source_pair(
+    acc: FloatArray, slot: int, i: int, j: int, sources: Sources, bins: Binning
+) -> None:
+    """Add the pair of sources ``i`` and ``j``."""
+    chord = distance(sources.positions, i, sources.positions, j)
+    separation = chord_to_separation(chord, bins.angular)
     sigma = 0.0
-    if use_pos:
-        vi = projected_variance(
-            xyz[i], xyz[j], east[i], north[i], pcov[i, 0], pcov[i, 1], pcov[i, 2]
+    if bins.use_position_errors:
+        sigma = math.sqrt(
+            position_var_towards(i, j, sources) + position_var_towards(j, i, sources)
         )
-        vj = projected_variance(
-            xyz[j], xyz[i], east[j], north[j], pcov[j, 0], pcov[j, 1], pcov[j, 2]
-        )
-        sigma = math.sqrt(vi + vj)
-    wij = w[i] * w[j]
-    df = f[i] - f[j]
-    soft_bins(
+    weight = sources.weights[i] * sources.weights[j]
+    difference = sources.values[i] - sources.values[j]
+    contribution = Contribution(
+        weight,
+        weight * difference * difference,
+        weight * (sources.error_var[i] + sources.error_var[j]),
+        weight * separation,
+        1.0,
+    )
+    add_pair_to_bins(
         acc,
         slot,
-        sep,
+        separation,
         sigma,
-        edges,
-        patch[i],
-        patch[j],
-        patch[j],
-        False,
-        wij,
-        wij * df * df,
-        wij * (sig2[i] + sig2[j]),
-        1.0,
+        bins,
+        sources.patch[i],
+        sources.patch[j],
+        contribution,
     )
 
 
 @numba.njit(cache=True, parallel=True)
-def brute_pairs(
-    xyz: FloatArray,
-    f: FloatArray,
-    sig2: FloatArray,
-    w: FloatArray,
-    patch: IntArray,
-    edges: FloatArray,
-    acc: FloatArray,
-    angular: bool,
-    east: FloatArray,
-    north: FloatArray,
-    pcov: FloatArray,
-    use_pos: bool,
-) -> FloatArray:
-    """All-pairs exact two-point accumulation.
+def brute_pairs(sources: Sources, bins: Binning, acc: FloatArray) -> FloatArray:
+    """Sum over every pair of sources (reference implementation).
 
-    Rows are interleaved across thread slots for load balance over the
-    triangular ``i < j`` loop.
+    Rows are interleaved between threads to balance the triangular loop.
 
     Returns:
-        Accumulator summed over slots, shape ``(kind, bin, patch, stat)``.
+        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
     """
-    n = xyz.shape[0]
+    n_sources = sources.values.size
     n_slots = acc.shape[0]
     for slot in numba.prange(n_slots):
-        for i in range(slot, n, n_slots):
-            for j in range(i + 1, n):
-                pair_into(
-                    acc,
-                    slot,
-                    i,
-                    j,
-                    xyz,
-                    f,
-                    sig2,
-                    w,
-                    patch,
-                    edges,
-                    angular,
-                    east,
-                    north,
-                    pcov,
-                    use_pos,
-                )
+        for i in range(slot, n_sources, n_slots):
+            for j in range(i + 1, n_sources):
+                add_source_pair(acc, slot, i, j, sources, bins)
     return acc.sum(axis=0)
 
 
-def empty_pos_arrays(n: int) -> tuple[FloatArray, FloatArray, FloatArray]:
-    """Placeholder east/north/covariance arrays when positional errors are off."""
-    return np.zeros((n, 3)), np.zeros((n, 3)), np.zeros((n, 3))
+def no_position_errors(n_sources: int) -> tuple[FloatArray, FloatArray, FloatArray]:
+    """Placeholder east, north and covariance arrays without position errors."""
+    return np.zeros((n_sources, 3)), np.zeros((n_sources, 3)), np.zeros((n_sources, 3))

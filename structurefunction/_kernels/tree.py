@@ -1,22 +1,21 @@
-"""Patch-pure ball tree with per-node value moments, and dual-tree 2-point kernel.
+"""Ball tree with per-node value moments, and the two-point tree kernel.
 
-Every node stores the weighted mean ``mu``, the weighted sum of squared
-deviations ``M2`` and the weighted noise sum ``S = sum w sigma^2`` of its
-sources. For two disjoint nodes ``A`` and ``B`` the sum over all cross pairs is
-then exact and free of cancellation:
+Every node stores the weighted mean, the weighted sum of squared deviations
+and the weighted error variance of its sources. For two separate groups ``A``
+and ``B`` the sum over all pairs between them is then exact, without visiting
+the pairs, and every term is positive (no loss of precision):
 
     sum_{i in A, j in B} w_i w_j (f_i - f_j)^2
-        = W_B M2_A + W_A M2_B + W_A W_B (mu_A - mu_B)^2
+        = W_B SqDev_A + W_A SqDev_B + W_A W_B (Mean_A - Mean_B)^2
 
-The only approximation when a node pair is accepted as a block is that every
-pair is given the separation of the node centres.
+The only approximation when a pair of groups is added at once is the
+separation assigned to its pairs.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numba
 import numpy as np
@@ -24,536 +23,541 @@ import numpy as np
 # Exported at runtime but missing from numba's type information.
 from numba import get_thread_id  # type: ignore[attr-defined]
 
-from structurefunction._kernels.brute import pair_into
+from structurefunction._kernels.brute import add_source_pair
 from structurefunction._kernels.common import (
+    Contribution,
     add_pair,
-    chord_to_sep,
+    chord_to_separation,
+    distance,
     find_bin,
-    norm_cdf,
+    gaussian_bin_fraction,
+    gaussian_bin_range,
 )
-
-if TYPE_CHECKING:
-    from structurefunction.types import FloatArray, IntArray
+from structurefunction._kernels.containers import Binning, Moment, Nodes, Sources
+from structurefunction.types import FloatArray, IntArray
 
 
 @dataclass(frozen=True, slots=True)
 class Tree:
-    """Flat-array ball tree over patch-sorted sources.
-
-    Attributes:
-        order: Permutation from tree order to input order.
-        roots: Root node index of each patch.
-        start, end: Source range ``[start, end)`` (tree order) of each node.
-        left, right: Children (``-1`` for leaves).
-        centre: Node centre, shape ``(n_node, 3)``.
-        radius: Max distance from centre to a member.
-        moments: ``(n_node, 6)``: W, mu, M2, S, n, max major-axis position var.
-        patch: Patch of each node.
-    """
+    """A ball tree with one subtree per patch."""
 
     order: IntArray
+    """Input index of each source in tree order."""
     roots: IntArray
-    start: IntArray
-    end: IntArray
-    left: IntArray
-    right: IntArray
-    centre: FloatArray
-    radius: FloatArray
-    moments: FloatArray
-    patch: IntArray
+    """Root node of each patch (-1 for an empty patch)."""
+    nodes: Nodes
 
 
 def build_tree(
-    xyz: FloatArray,
-    f: FloatArray,
-    sig2: FloatArray,
-    w: FloatArray,
+    positions: FloatArray,
+    values: FloatArray,
+    error_var: FloatArray,
+    weights: FloatArray,
     patch: IntArray,
     n_patch: int,
-    pos_var_major: FloatArray,
+    max_position_var: FloatArray,
     leaf_size: int = 4,
 ) -> Tree:
-    """Build one subtree per patch (so every node is patch-pure).
+    """Build one subtree per patch, so no node spans two patches.
 
-    Source arrays must afterwards be indexed with ``tree.order`` so that node
-    ranges ``[start, end)`` address contiguous sources.
+    Source arrays must afterwards be indexed with ``tree.order``, so that
+    each node's sources are contiguous.
     """
     by_patch = np.argsort(patch, kind="stable").astype(np.intp)
-    bounds = np.searchsorted(patch[by_patch], np.arange(n_patch + 1)).astype(np.intp)
-    arrays = _build(
-        xyz[by_patch],
-        f[by_patch],
-        sig2[by_patch],
-        w[by_patch],
-        pos_var_major[by_patch],
-        bounds,
+    patch_bounds = np.searchsorted(patch[by_patch], np.arange(n_patch + 1))
+    nodes, roots, permutation = _build(
+        positions[by_patch],
+        values[by_patch],
+        error_var[by_patch],
+        weights[by_patch],
+        max_position_var[by_patch],
+        patch_bounds.astype(np.intp),
         leaf_size,
     )
-    start, end, left, right, centre, radius, moments, roots, node_patch, perm = arrays
-    return Tree(
-        order=by_patch[perm],
-        roots=roots,
-        start=start,
-        end=end,
-        left=left,
-        right=right,
-        centre=centre,
-        radius=radius,
-        moments=moments,
-        patch=node_patch,
-    )
+    return Tree(order=by_patch[permutation], roots=roots, nodes=nodes)
+
+
+def frontier(tree: Tree, min_nodes: int) -> IntArray:
+    """Non-overlapping nodes that together hold every source.
+
+    Starts from the patch roots and splits the largest node until there are
+    at least ``min_nodes``, so the work can be shared between threads even
+    with a single patch.
+    """
+    nodes = [int(root) for root in tree.roots if root >= 0]
+    while len(nodes) < min_nodes:
+        splittable = [node for node in nodes if tree.nodes.left[node] >= 0]
+        if not splittable:
+            break
+        biggest = max(splittable, key=lambda n: tree.nodes.end[n] - tree.nodes.start[n])
+        nodes.remove(biggest)
+        left = int(tree.nodes.left[biggest])
+        nodes.extend((left, left + 1))
+    return np.asarray(nodes, dtype=np.intp)
+
+
+# --------------------------------------------------------------------------
+# Construction
+
+
+@numba.njit(cache=True)
+def _split_axis(positions: FloatArray, members: IntArray) -> int:
+    """Axis with the largest spread of ``positions[members]``, or -1 if none."""
+    best_axis = -1
+    best_spread = 0.0
+    for axis in range(3):
+        coords = positions[members, axis]
+        spread = coords.max() - coords.min()
+        if spread > best_spread:
+            best_axis = axis
+            best_spread = spread
+    return best_axis
 
 
 @numba.njit(cache=True)
 def _build(
-    xyz: FloatArray,
-    f: FloatArray,
-    sig2: FloatArray,
-    w: FloatArray,
-    vmaj: FloatArray,
-    bounds: IntArray,
+    positions: FloatArray,
+    values: FloatArray,
+    error_var: FloatArray,
+    weights: FloatArray,
+    max_position_var: FloatArray,
+    patch_bounds: IntArray,
     leaf_size: int,
-) -> tuple[
-    IntArray,
-    IntArray,
-    IntArray,
-    IntArray,
-    FloatArray,
-    FloatArray,
-    FloatArray,
-    IntArray,
-    IntArray,
-    IntArray,
-]:
-    """Median-split construction; returns node arrays and the tree-order permutation."""
-    n = xyz.shape[0]
-    n_patch = bounds.size - 1
-    cap = 4 * (n // max(leaf_size // 2, 1) + 1) + 2 * n_patch + 8
-    start = np.empty(cap, np.intp)
-    end = np.empty(cap, np.intp)
-    left = np.full(cap, -1, np.intp)
-    right = np.full(cap, -1, np.intp)
-    node_patch = np.empty(cap, np.intp)
+) -> tuple[Nodes, IntArray, IntArray]:
+    """Median-split construction.
+
+    Returns:
+        The nodes, the root of each patch and the tree-order permutation.
+    """
+    n_sources = positions.shape[0]
+    n_patch = patch_bounds.size - 1
+    capacity = 4 * (n_sources // max(leaf_size // 2, 1) + 1) + 2 * n_patch + 8
+    start = np.empty(capacity, np.intp)
+    end = np.empty(capacity, np.intp)
+    left = np.full(capacity, -1, np.intp)
+    node_patch = np.empty(capacity, np.intp)
     roots = np.full(n_patch, -1, np.intp)
-    perm = np.arange(n)
-    stack = np.empty((cap, 2), np.intp)
+    permutation = np.arange(n_sources)
+    to_split = np.empty(capacity, np.intp)
     n_node = 0
-    for p in range(n_patch):
-        if bounds[p + 1] <= bounds[p]:
+
+    for patch in range(n_patch):
+        if patch_bounds[patch + 1] <= patch_bounds[patch]:
             continue
-        roots[p] = n_node
-        start[n_node] = bounds[p]
-        end[n_node] = bounds[p + 1]
-        node_patch[n_node] = p
+        roots[patch] = n_node
+        start[n_node] = patch_bounds[patch]
+        end[n_node] = patch_bounds[patch + 1]
+        node_patch[n_node] = patch
         n_node += 1
-        top = 0
-        stack[top, 0] = roots[p]
-        top += 1
-        while top > 0:
-            top -= 1
-            node = stack[top, 0]
-            s = start[node]
-            e = end[node]
-            if e - s <= leaf_size:
+        n_pending = 1
+        to_split[0] = roots[patch]
+        while n_pending > 0:
+            n_pending -= 1
+            node = to_split[n_pending]
+            first, stop = start[node], end[node]
+            if stop - first <= leaf_size:
                 continue
-            # Split on the axis of largest spread at the median.
-            spread = np.empty(3)
-            for ax in range(3):
-                spread[ax] = xyz[perm[s:e], ax].max() - xyz[perm[s:e], ax].min()
-            ax = int(np.argmax(spread))
-            if spread[ax] <= 0.0:
-                continue  # coincident points: keep as a (large) leaf
-            idx = np.argsort(xyz[perm[s:e], ax])
-            perm[s:e] = perm[s:e][idx]
-            mid = s + (e - s) // 2
+            members = permutation[first:stop]
+            axis = _split_axis(positions, members)
+            if axis < 0:
+                continue  # all sources coincide: keep as one leaf
+            permutation[first:stop] = members[np.argsort(positions[members, axis])]
+            middle = first + (stop - first) // 2
             left[node] = n_node
-            start[n_node] = s
-            end[n_node] = mid
-            node_patch[n_node] = p
-            stack[top, 0] = n_node
-            top += 1
-            n_node += 1
-            right[node] = n_node
-            start[n_node] = mid
-            end[n_node] = e
-            node_patch[n_node] = p
-            stack[top, 0] = n_node
-            top += 1
-            n_node += 1
+            for child_start, child_end in ((first, middle), (middle, stop)):
+                start[n_node] = child_start
+                end[n_node] = child_end
+                node_patch[n_node] = patch
+                to_split[n_pending] = n_node
+                n_pending += 1
+                n_node += 1
 
-    # Node ranges index the permuted (tree-order) sources.
-    xyz = xyz[perm]
-    f = f[perm]
-    sig2 = sig2[perm]
-    w = w[perm]
-    vmaj = vmaj[perm]
-
-    centre = np.zeros((n_node, 3))
-    radius = np.zeros(n_node)
-    moments = np.zeros((n_node, 6))
-    for node in range(n_node):
-        s = start[node]
-        e = end[node]
-        for ax in range(3):
-            centre[node, ax] = xyz[s:e, ax].mean()
-        r2 = 0.0
-        for i in range(s, e):
-            d2 = 0.0
-            for ax in range(3):
-                d = xyz[i, ax] - centre[node, ax]
-                d2 += d * d
-            r2 = max(r2, d2)
-        radius[node] = math.sqrt(r2)
-        # Two-pass weighted moments (exact; nodes are small near the leaves and
-        # this is O(N log N) overall).
-        wsum = 0.0
-        wf = 0.0
-        ssum = 0.0
-        vmax = 0.0
-        for i in range(s, e):
-            wsum += w[i]
-            wf += w[i] * f[i]
-            ssum += w[i] * sig2[i]
-            vmax = max(vmax, vmaj[i])
-        mu = wf / wsum if wsum > 0.0 else 0.0
-        m2 = 0.0
-        for i in range(s, e):
-            d = f[i] - mu
-            m2 += w[i] * d * d
-        moments[node, 0] = wsum
-        moments[node, 1] = mu
-        moments[node, 2] = m2
-        moments[node, 3] = ssum
-        moments[node, 4] = e - s
-        moments[node, 5] = vmax
-    return (
+    centre, radius, moments = _node_summaries(
+        start[:n_node],
+        end[:n_node],
+        positions[permutation],
+        values[permutation],
+        error_var[permutation],
+        weights[permutation],
+        max_position_var[permutation],
+    )
+    nodes = Nodes(
         start[:n_node],
         end[:n_node],
         left[:n_node],
-        right[:n_node],
         centre,
         radius,
         moments,
-        roots,
         node_patch[:n_node],
-        perm,
     )
+    return nodes, roots, permutation
 
 
 @numba.njit(cache=True)
-def _node_pair(
-    acc: FloatArray,
-    slot: int,
-    b: int,
-    frac: float,
-    sep: float,
-    ma: FloatArray,
-    mb: FloatArray,
-    pa: int,
-    pb: int,
-) -> None:
-    """Accumulate all cross pairs of two nodes into bin ``b`` with weight ``frac``."""
-    wa = ma[0]
-    wb = mb[0]
-    dmu = ma[1] - mb[1]
-    wd = wb * ma[2] + wa * mb[2] + wa * wb * dmu * dmu
-    bias = wb * ma[3] + wa * mb[3]
-    ww = wa * wb
-    add_pair(
-        acc,
-        slot,
-        b,
-        pa,
-        pb,
-        frac * ww,
-        frac * wd,
-        frac * bias,
-        frac * ww * sep,
-        frac * ma[4] * mb[4],
-    )
+def _node_summaries(
+    start: IntArray,
+    end: IntArray,
+    positions: FloatArray,
+    values: FloatArray,
+    error_var: FloatArray,
+    weights: FloatArray,
+    max_position_var: FloatArray,
+) -> tuple[FloatArray, FloatArray, FloatArray]:
+    """Centre, radius and value moments of every node (sources in tree order)."""
+    n_node = start.size
+    centre = np.zeros((n_node, 3))
+    radius = np.zeros(n_node)
+    # MAX_POSITION_VAR is the last column.
+    moments = np.zeros((n_node, Moment.MAX_POSITION_VAR + 1))
+    for node in range(n_node):
+        first, stop = start[node], end[node]
+        for axis in range(3):
+            centre[node, axis] = positions[first:stop, axis].mean()
+        largest = 0.0
+        for i in range(first, stop):
+            largest = max(largest, distance(positions, i, centre, node))
+        radius[node] = largest
+
+        node_weights = weights[first:stop]
+        total_weight = node_weights.sum()
+        mean = 0.0
+        if total_weight > 0.0:
+            mean = (node_weights * values[first:stop]).sum() / total_weight
+        deviations = values[first:stop] - mean
+        moments[node, Moment.WEIGHT] = total_weight
+        moments[node, Moment.MEAN] = mean
+        moments[node, Moment.SQUARED_DEVIATION] = (
+            node_weights * deviations * deviations
+        ).sum()
+        moments[node, Moment.ERROR_VAR] = (node_weights * error_var[first:stop]).sum()
+        moments[node, Moment.COUNT] = stop - first
+        moments[node, Moment.MAX_POSITION_VAR] = max_position_var[first:stop].max()
+    return centre, radius, moments
 
 
-@numba.njit(cache=True)
-def _accept_block(
-    acc: FloatArray,
-    slot: int,
-    sep: float,
-    sigma: float,
-    edges: FloatArray,
-    ma: FloatArray,
-    mb: FloatArray,
-    pa: int,
-    pb: int,
-) -> None:
-    """Accumulate a node pair at one separation, softly binned if ``sigma > 0``."""
-    if sigma <= 0.0:
-        b = find_bin(sep, edges)
-        if b >= 0:
-            _node_pair(acc, slot, b, 1.0, sep, ma, mb, pa, pb)
-        return
-    lo = find_bin(max(sep - 5.0 * sigma, edges[0]), edges)
-    hi = find_bin(min(sep + 5.0 * sigma, np.nextafter(edges[-1], 0.0)), edges)
-    if lo < 0 or hi < 0:
-        return
-    for k in range(lo, hi + 1):
-        frac = norm_cdf((edges[k + 1] - sep) / sigma) - norm_cdf(
-            (edges[k] - sep) / sigma
-        )
-        if frac > 0.0:
-            _node_pair(acc, slot, k, frac, sep, ma, mb, pa, pb)
+# --------------------------------------------------------------------------
+# Adding a whole pair of nodes at once
 
 
 @numba.njit(cache=True, inline="always")
-def _triangle_cdf(x: float, lo: float, mode: float, hi: float) -> float:
-    """CDF of the triangular distribution on ``[lo, hi]`` peaking at ``mode``."""
-    if x <= lo:
+def _group_pair_contribution(
+    nodes: Nodes, node_a: int, node_b: int, separation: float
+) -> Contribution:
+    """Sum over all pairs between two nodes, placed at ``separation``."""
+    moments = nodes.moments
+    weight_a = moments[node_a, Moment.WEIGHT]
+    weight_b = moments[node_b, Moment.WEIGHT]
+    mean_difference = moments[node_a, Moment.MEAN] - moments[node_b, Moment.MEAN]
+    weight = weight_a * weight_b
+    squared_diff = (
+        weight_b * moments[node_a, Moment.SQUARED_DEVIATION]
+        + weight_a * moments[node_b, Moment.SQUARED_DEVIATION]
+        + weight * mean_difference * mean_difference
+    )
+    error_bias = (
+        weight_b * moments[node_a, Moment.ERROR_VAR]
+        + weight_a * moments[node_b, Moment.ERROR_VAR]
+    )
+    count = moments[node_a, Moment.COUNT] * moments[node_b, Moment.COUNT]
+    return Contribution(weight, squared_diff, error_bias, weight * separation, count)
+
+
+@numba.njit(cache=True, inline="always")
+def _add_node_pair_to_bin(
+    acc: FloatArray,
+    slot: int,
+    bin_index: int,
+    fraction: float,
+    separation: float,
+    nodes: Nodes,
+    node_a: int,
+    node_b: int,
+) -> None:
+    contribution = _group_pair_contribution(nodes, node_a, node_b, separation)
+    add_pair(
+        acc,
+        slot,
+        bin_index,
+        nodes.patch[node_a],
+        nodes.patch[node_b],
+        contribution,
+        fraction,
+    )
+
+
+@numba.njit(cache=True, inline="always")
+def _triangle_cdf(x: float, low: float, peak: float, high: float) -> float:
+    """CDF of the triangular distribution on ``[low, high]`` peaking at ``peak``."""
+    if x <= low:
         return 0.0
-    if x >= hi:
+    if x >= high:
         return 1.0
-    if x <= mode:
-        return (x - lo) ** 2 / ((hi - lo) * (mode - lo))
-    return 1.0 - (hi - x) ** 2 / ((hi - lo) * (hi - mode))
+    if x <= peak:
+        return (x - low) ** 2 / ((high - low) * (peak - low))
+    return 1.0 - (high - x) ** 2 / ((high - low) * (high - peak))
+
+
+@numba.njit(cache=True, inline="always")
+def _spread_node_pair(
+    acc: FloatArray,
+    slot: int,
+    nodes: Nodes,
+    node_a: int,
+    node_b: int,
+    closest: float,
+    centre_separation: float,
+    farthest: float,
+    edges: FloatArray,
+) -> None:
+    """Share a node pair between the bins its separations cover.
+
+    The pairs' separations are modelled as triangular between the closest and
+    farthest possible values, peaking at the centre separation.
+    """
+    tiny = 1e-15 * farthest
+    peak = min(max(centre_separation, closest + tiny), farthest - tiny)
+    first = find_bin(max(closest, edges[0]), edges)
+    last = find_bin(min(farthest, np.nextafter(edges[-1], 0.0)), edges)
+    if first < 0 or last < 0:
+        return
+    for bin_index in range(first, last + 1):
+        low = max(closest, edges[bin_index])
+        high = min(farthest, edges[bin_index + 1])
+        fraction = _triangle_cdf(high, closest, peak, farthest) - _triangle_cdf(
+            low, closest, peak, farthest
+        )
+        if fraction > 0.0:
+            _add_node_pair_to_bin(
+                acc,
+                slot,
+                bin_index,
+                fraction,
+                0.5 * (low + high),
+                nodes,
+                node_a,
+                node_b,
+            )
+
+
+@numba.njit(cache=True, inline="always")
+def _blur_node_pair(
+    acc: FloatArray,
+    slot: int,
+    nodes: Nodes,
+    node_a: int,
+    node_b: int,
+    separation: float,
+    sigma: float,
+    edges: FloatArray,
+) -> None:
+    """Spread a node pair over bins with a Gaussian of width ``sigma``."""
+    first, last = gaussian_bin_range(separation, sigma, edges)
+    if first < 0:
+        return
+    for bin_index in range(first, last + 1):
+        fraction = gaussian_bin_fraction(separation, sigma, edges, bin_index)
+        if fraction > 0.0:
+            _add_node_pair_to_bin(
+                acc, slot, bin_index, fraction, separation, nodes, node_a, node_b
+            )
+
+
+@numba.njit(cache=True, inline="always")
+def _bin_width(edges: FloatArray, bin_index: int) -> float:
+    """Width of a bin; the open top bin borrows the width of the one below."""
+    width: float = edges[bin_index + 1] - edges[bin_index]
+    if math.isfinite(width):
+        return width
+    if bin_index == 0:
+        return 0.0
+    below: float = edges[bin_index] - edges[bin_index - 1]
+    return below
 
 
 @numba.njit(cache=True)
-def _accept_spread(
+def _try_whole_node_pair(
     acc: FloatArray,
     slot: int,
-    smin: float,
-    sep_c: float,
-    smax: float,
-    edges: FloatArray,
-    ma: FloatArray,
-    mb: FloatArray,
-    pa: int,
-    pb: int,
-) -> None:
-    """Share a node pair between the bins its separations span.
+    nodes: Nodes,
+    node_a: int,
+    node_b: int,
+    bins: Binning,
+) -> bool:
+    """Add all pairs between two nodes at once, if that is accurate enough.
 
-    Separations of the pairs are modelled as triangular on ``[smin, smax]``
-    peaking at the centre separation, which is a good description for two
-    compact groups and much better than assigning everything to one bin.
+    Returns:
+        Whether the node pair was handled (added, or entirely out of range).
     """
-    mode = min(max(sep_c, smin + 1e-15 * smax), smax - 1e-15 * smax)
-    lo = find_bin(max(smin, edges[0]), edges)
-    hi = find_bin(min(smax, np.nextafter(edges[-1], 0.0)), edges)
-    if lo < 0 or hi < 0:
-        return
-    for k in range(lo, hi + 1):
-        a = max(smin, edges[k])
-        b = min(smax, edges[k + 1])
-        frac = _triangle_cdf(b, smin, mode, smax) - _triangle_cdf(a, smin, mode, smax)
-        if frac > 0.0:
-            _node_pair(acc, slot, k, frac, 0.5 * (a + b), ma, mb, pa, pb)
+    centre_distance = distance(nodes.centre, node_a, nodes.centre, node_b)
+    radii = nodes.radius[node_a] + nodes.radius[node_b]
+    centre_separation = chord_to_separation(centre_distance, bins.angular)
+    closest = chord_to_separation(max(centre_distance - radii, 0.0), bins.angular)
+    farthest = chord_to_separation(centre_distance + radii, bins.angular)
+    position_sigma = 0.0
+    if bins.use_position_errors:
+        position_sigma = math.sqrt(
+            nodes.moments[node_a, Moment.MAX_POSITION_VAR]
+            + nodes.moments[node_b, Moment.MAX_POSITION_VAR]
+        )
+    margin = 5.0 * position_sigma
+    edges = bins.edges
+    if farthest + margin < edges[0] or closest - margin >= edges[-1]:
+        return True  # no pair can land in any bin
+
+    # Exact: every pair (allowing for position errors) is in the same bin.
+    first = find_bin(closest - margin, edges)
+    if first >= 0 and first == find_bin(farthest + margin, edges):
+        _add_node_pair_to_bin(
+            acc, slot, first, 1.0, centre_separation, nodes, node_a, node_b
+        )
+        return True
+
+    # Approximate: the spread of separations is small compared with the bin.
+    if bins.tolerance <= 0.0:
+        return False
+    centre_bin = find_bin(centre_separation, edges)
+    if centre_bin < 0:
+        return False
+    spread = 0.5 * (farthest - closest)
+    if spread > bins.tolerance * _bin_width(edges, centre_bin):
+        return False
+    if bins.use_position_errors:
+        _blur_node_pair(
+            acc, slot, nodes, node_a, node_b, centre_separation, position_sigma, edges
+        )
+    else:
+        _spread_node_pair(
+            acc,
+            slot,
+            nodes,
+            node_a,
+            node_b,
+            closest,
+            centre_separation,
+            farthest,
+            edges,
+        )
+    return True
+
+
+# --------------------------------------------------------------------------
+# Traversal
+
+
+@numba.njit(cache=True)
+def _add_pairs_within_leaf(
+    acc: FloatArray, slot: int, node: int, nodes: Nodes, sources: Sources, bins: Binning
+) -> None:
+    for i in range(nodes.start[node], nodes.end[node]):
+        for j in range(i + 1, nodes.end[node]):
+            add_source_pair(acc, slot, i, j, sources, bins)
+
+
+@numba.njit(cache=True)
+def _add_pairs_between_leaves(
+    acc: FloatArray,
+    slot: int,
+    node_a: int,
+    node_b: int,
+    nodes: Nodes,
+    sources: Sources,
+    bins: Binning,
+) -> None:
+    for i in range(nodes.start[node_a], nodes.end[node_a]):
+        for j in range(nodes.start[node_b], nodes.end[node_b]):
+            add_source_pair(acc, slot, i, j, sources, bins)
+
+
+@numba.njit(cache=True)
+def _push(todo: IntArray, n_todo: int, node_a: int, node_b: int) -> int:
+    todo[n_todo, 0] = node_a
+    todo[n_todo, 1] = node_b
+    return n_todo + 1
+
+
+@numba.njit(cache=True)
+def _sum_node_pair(
+    acc: FloatArray,
+    slot: int,
+    start_a: int,
+    start_b: int,
+    nodes: Nodes,
+    sources: Sources,
+    bins: Binning,
+) -> None:
+    """All pairs with one source under ``start_a`` and one under ``start_b``.
+
+    With ``start_a == start_b``, all pairs within that node.
+    """
+    todo = np.empty((64, 2), np.intp)
+    n_todo = _push(todo, 0, start_a, start_b)
+    while n_todo > 0:
+        if n_todo + 3 > todo.shape[0]:
+            bigger = np.empty((2 * todo.shape[0], 2), np.intp)
+            bigger[:n_todo] = todo[:n_todo]
+            todo = bigger
+        n_todo -= 1
+        node_a, node_b = todo[n_todo, 0], todo[n_todo, 1]
+        a_is_leaf = nodes.left[node_a] < 0
+        b_is_leaf = nodes.left[node_b] < 0
+
+        if node_a == node_b:
+            if a_is_leaf:
+                _add_pairs_within_leaf(acc, slot, node_a, nodes, sources, bins)
+            else:
+                child = nodes.left[node_a]
+                n_todo = _push(todo, n_todo, child, child)
+                n_todo = _push(todo, n_todo, child + 1, child + 1)
+                n_todo = _push(todo, n_todo, child, child + 1)
+            continue
+
+        if _try_whole_node_pair(acc, slot, nodes, node_a, node_b, bins):
+            continue
+        if a_is_leaf and b_is_leaf:
+            _add_pairs_between_leaves(acc, slot, node_a, node_b, nodes, sources, bins)
+            continue
+        # Split the larger node.
+        if b_is_leaf or (
+            not a_is_leaf and nodes.radius[node_a] >= nodes.radius[node_b]
+        ):
+            child = nodes.left[node_a]
+            n_todo = _push(todo, n_todo, child, node_b)
+            n_todo = _push(todo, n_todo, child + 1, node_b)
+        else:
+            child = nodes.left[node_b]
+            n_todo = _push(todo, n_todo, node_a, child)
+            n_todo = _push(todo, n_todo, node_a, child + 1)
 
 
 @numba.njit(cache=True, parallel=True)
-def dual_tree_pairs(
-    start: IntArray,
-    end: IntArray,
-    left: IntArray,
-    right: IntArray,
-    centre: FloatArray,
-    radius: FloatArray,
-    moments: FloatArray,
-    node_patch: IntArray,
-    frontier: IntArray,
-    xyz: FloatArray,
-    f: FloatArray,
-    sig2: FloatArray,
-    w: FloatArray,
-    patch: IntArray,
-    edges: FloatArray,
+def tree_pairs(
+    nodes: Nodes,
+    sources: Sources,
+    bins: Binning,
+    start_nodes: IntArray,
     acc: FloatArray,
-    angular: bool,
-    bin_tolerance: float,
-    east: FloatArray,
-    north: FloatArray,
-    pcov: FloatArray,
-    use_pos: bool,
 ) -> FloatArray:
-    """Dual-tree two-point accumulation over all patch-root pairs.
+    """Two-point sums over all pairs, using the tree.
 
-    A node pair is accepted as a block when every pair it contains (widened by
-    5 sigma of positional error) falls in a single bin (exact), or when the
-    spread of separations is within ``bin_tolerance`` of a bin width
-    (approximate). Otherwise the larger node is split; leaf pairs are summed
-    exactly.
+    Each pair of ``start_nodes`` (including each node with itself) is one
+    parallel task. The start nodes hold every source exactly once, so every
+    source pair is counted once.
+
+    Returns:
+        Accumulator summed over threads, shape ``(kind, bin, patch, stat)``.
     """
-    # Every pair of frontier nodes (including each node with itself) is one
-    # parallel task; the frontier partitions the sources, so each source pair
-    # is visited exactly once.
-    n_front = frontier.size
-    n_tasks = n_front * (n_front + 1) // 2
+    n_start = start_nodes.size
+    n_tasks = n_start * (n_start + 1) // 2
     task_a = np.empty(n_tasks, np.intp)
     task_b = np.empty(n_tasks, np.intp)
-    t = 0
-    for ia in range(n_front):
-        for ib in range(ia, n_front):
-            task_a[t] = frontier[ia]
-            task_b[t] = frontier[ib]
-            t += 1
-    s_lo = edges[0]
-    s_hi = edges[-1]
-    for t in numba.prange(n_tasks):
-        slot = get_thread_id()
-        stack = np.empty((256, 2), np.intp)
-        top = 0
-        stack[0, 0] = task_a[t]
-        stack[0, 1] = task_b[t]
-        top = 1
-        while top > 0:
-            top -= 1
-            a = stack[top, 0]
-            b = stack[top, 1]
-            if top + 3 >= stack.shape[0]:
-                grown = np.empty((stack.shape[0] * 2, 2), np.intp)
-                grown[: stack.shape[0]] = stack
-                stack = grown
-            if a == b:
-                if left[a] < 0:
-                    for i in range(start[a], end[a]):
-                        for j in range(i + 1, end[a]):
-                            pair_into(
-                                acc,
-                                slot,
-                                i,
-                                j,
-                                xyz,
-                                f,
-                                sig2,
-                                w,
-                                patch,
-                                edges,
-                                angular,
-                                east,
-                                north,
-                                pcov,
-                                use_pos,
-                            )
-                else:
-                    stack[top, 0] = left[a]
-                    stack[top, 1] = left[a]
-                    stack[top + 1, 0] = right[a]
-                    stack[top + 1, 1] = right[a]
-                    stack[top + 2, 0] = left[a]
-                    stack[top + 2, 1] = right[a]
-                    top += 3
-                continue
-            d2 = 0.0
-            for ax in range(3):
-                dd = centre[a, ax] - centre[b, ax]
-                d2 += dd * dd
-            d = math.sqrt(d2)
-            rr = radius[a] + radius[b]
-            sep_c = chord_to_sep(d, angular)
-            smin = chord_to_sep(max(d - rr, 0.0), angular)
-            smax = chord_to_sep(d + rr, angular)
-            pad = 0.0
-            if use_pos:
-                pad = 5.0 * math.sqrt(moments[a, 5] + moments[b, 5])
-            if smax + pad < s_lo or smin - pad >= s_hi:
-                continue  # entirely outside the binned range
-            kmin = find_bin(smin - pad, edges)
-            kmax = find_bin(smax + pad, edges)
-            if kmin >= 0 and kmin == kmax:
-                _accept_block(
-                    acc,
-                    slot,
-                    sep_c,
-                    0.0,
-                    edges,
-                    moments[a],
-                    moments[b],
-                    node_patch[a],
-                    node_patch[b],
-                )
-                continue
-            if bin_tolerance > 0.0:
-                kc = find_bin(sep_c, edges)
-                width = 0.0
-                if kc >= 0:
-                    width = edges[kc + 1] - edges[kc]
-                    if not math.isfinite(width):
-                        # Open top bin: use the scale of the bin below it.
-                        width = edges[kc] - edges[max(kc - 1, 0)] if kc > 0 else 0.0
-                if kc >= 0 and 0.5 * (smax - smin) <= bin_tolerance * width:
-                    if use_pos:
-                        sigma = math.sqrt(moments[a, 5] + moments[b, 5])
-                        _accept_block(
-                            acc,
-                            slot,
-                            sep_c,
-                            sigma,
-                            edges,
-                            moments[a],
-                            moments[b],
-                            node_patch[a],
-                            node_patch[b],
-                        )
-                    else:
-                        _accept_spread(
-                            acc,
-                            slot,
-                            smin,
-                            sep_c,
-                            smax,
-                            edges,
-                            moments[a],
-                            moments[b],
-                            node_patch[a],
-                            node_patch[b],
-                        )
-                    continue
-            a_leaf = left[a] < 0
-            b_leaf = left[b] < 0
-            if a_leaf and b_leaf:
-                for i in range(start[a], end[a]):
-                    for j in range(start[b], end[b]):
-                        pair_into(
-                            acc,
-                            slot,
-                            i,
-                            j,
-                            xyz,
-                            f,
-                            sig2,
-                            w,
-                            patch,
-                            edges,
-                            angular,
-                            east,
-                            north,
-                            pcov,
-                            use_pos,
-                        )
-                continue
-            if b_leaf or (not a_leaf and radius[a] >= radius[b]):
-                stack[top, 0] = left[a]
-                stack[top, 1] = b
-                stack[top + 1, 0] = right[a]
-                stack[top + 1, 1] = b
-            else:
-                stack[top, 0] = a
-                stack[top, 1] = left[b]
-                stack[top + 1, 0] = a
-                stack[top + 1, 1] = right[b]
-            top += 2
+    task = 0
+    for index_a in range(n_start):
+        for index_b in range(index_a, n_start):
+            task_a[task] = start_nodes[index_a]
+            task_b[task] = start_nodes[index_b]
+            task += 1
+    for task in numba.prange(n_tasks):
+        _sum_node_pair(
+            acc, get_thread_id(), task_a[task], task_b[task], nodes, sources, bins
+        )
     return acc.sum(axis=0)
-
-
-def frontier(tree: Tree, min_nodes: int) -> IntArray:
-    """Disjoint nodes covering all sources, at least ``min_nodes`` if possible.
-
-    Starts from the patch roots and repeatedly splits the largest node, so
-    that work can be shared between threads even with a single patch.
-    """
-    nodes = [int(r) for r in tree.roots if r >= 0]
-    while len(nodes) < min_nodes:
-        splittable = [n for n in nodes if tree.left[n] >= 0]
-        if not splittable:
-            break
-        biggest = max(splittable, key=lambda n: tree.end[n] - tree.start[n])
-        nodes.remove(biggest)
-        nodes.extend((int(tree.left[biggest]), int(tree.right[biggest])))
-    return np.asarray(nodes, dtype=np.intp)

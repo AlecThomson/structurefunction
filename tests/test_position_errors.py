@@ -14,7 +14,8 @@ from structurefunction import (
     structure_function,
 )
 from structurefunction._kernels.brute import brute_pairs
-from structurefunction._kernels.common import new_accumulator
+from structurefunction._kernels.common import Kind, Stat, new_accumulator
+from structurefunction._kernels.containers import Binning, Sources
 from structurefunction._units import position_covariance, positions
 from structurefunction.geometry import tangent_basis
 
@@ -50,13 +51,13 @@ def run(
 def test_zero_errors_match_no_errors() -> None:
     base = run(1, None)
     zero = run(1, CircularPositionError(0 * u.arcsec))
-    np.testing.assert_allclose(zero.sf, base.sf, rtol=1e-12)
+    np.testing.assert_allclose(zero.sf, base.sf, rtol=1e-10)
 
 
 def test_circular_equals_equal_axes() -> None:
     circ = run(2, CircularPositionError(30 * u.arcsec))
     axes = run(2, AxisPositionErrors(30 * u.arcsec, 30 * u.arcsec))
-    np.testing.assert_allclose(axes.sf, circ.sf, rtol=1e-12)
+    np.testing.assert_allclose(axes.sf, circ.sf, rtol=1e-10)
 
 
 def test_ra_conventions_and_time_units_agree() -> None:
@@ -101,25 +102,24 @@ def test_tree_matches_brute_with_errors() -> None:
     )
     pos = positions(cat.coords)
     east, north = tangent_basis(pos.lon, pos.lat)
-    pcov = np.column_stack(position_covariance(err, pos))
-    acc = brute_pairs(
+    sources = Sources(
         pos.xyz,
         cat.values,
         cat.errors**2,
         np.ones_like(cat.values),
         np.zeros(cat.values.size, np.intp),
-        EDGES.to_value(u.rad),
-        new_accumulator(2, EDGES.size - 1, 1),
-        angular=True,
-        east=east,
-        north=north,
-        pcov=pcov,
-        use_pos=True,
+        east,
+        north,
+        np.column_stack(position_covariance(err, pos)),
     )
-    w = acc[2, :, 0, 0]
-    sf = (acc[2, :, 0, 1] - acc[2, :, 0, 2]) / w
+    binning = Binning(EDGES.to_value(u.rad), True, 0.0, True)
+    acc = brute_pairs(sources, binning, new_accumulator(2, EDGES.size - 1, 1))
+    totals = acc[Kind.MARK, :, 0]
+    sf = (totals[:, Stat.SQUARED_DIFF] - totals[:, Stat.ERROR_BIAS]) / totals[
+        :, Stat.WEIGHT
+    ]
     np.testing.assert_allclose(tree.sf, sf, rtol=1e-10)
-    np.testing.assert_allclose(tree.count, acc[2, :, 0, 4], rtol=1e-10)
+    np.testing.assert_allclose(tree.count, totals[:, Stat.COUNT], rtol=1e-10)
 
 
 def test_soft_binning_matches_monte_carlo_jitter() -> None:

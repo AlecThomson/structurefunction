@@ -11,9 +11,9 @@ import numba
 import numpy as np
 
 from structurefunction import _units
-from structurefunction._kernels.brute import empty_pos_arrays
 from structurefunction._kernels.common import new_accumulator
-from structurefunction._kernels.tree import build_tree, dual_tree_pairs, frontier
+from structurefunction._kernels.containers import Binning, PolarGrid, Sources
+from structurefunction._kernels.tree import Tree, build_tree, frontier, tree_pairs
 from structurefunction._kernels.triplets import binned_triplets, exact_triplets
 from structurefunction.estimators import estimate
 from structurefunction.geometry import (
@@ -193,23 +193,18 @@ def structure_function(
     patch_info = make_patches(pos.xyz, patches, gen)
     labels = patch_info.labels
 
-    east, north = tangent_basis(pos.lon, pos.lat)
-    use_pos = pos_errors is not None
-    if use_pos and pos_errors is not None:
-        ve, vn, cen = _units.position_covariance(pos_errors, pos)
-        pcov = np.column_stack((ve, vn, cen))
-        vmaj = 0.5 * (ve + vn) + np.sqrt((0.5 * (ve - vn)) ** 2 + cen**2)
-    else:
-        _, _, pcov = empty_pos_arrays(n)
-        vmaj = np.zeros(n)
-    if not pos.angular:
-        east, north, _ = empty_pos_arrays(n)
-
-    sig2 = vals.errors**2
+    error_var = vals.errors**2
+    position_cov, max_position_var = _position_covariance(pos_errors, pos)
     tree = build_tree(
-        pos.xyz, vals.values, sig2, vals.weights, labels, patch_info.n_patch, vmaj
+        pos.xyz,
+        vals.values,
+        error_var,
+        vals.weights,
+        labels,
+        patch_info.n_patch,
+        max_position_var,
     )
-    o = tree.order
+    sources = _sources_in_tree_order(tree, pos, vals, error_var, labels, position_cov)
     acc = new_accumulator(numba.get_num_threads(), n_bins, patch_info.n_patch)
     logger.info(
         "Computing %d-point SF: %d sources, %d bins, %d patches",
@@ -222,96 +217,27 @@ def structure_function(
         # With the default upper edge (the largest separation in the data) no
         # pair can lie beyond it, so the top bin is left open. Otherwise every
         # group of pairs that might reach past it is split down to single pairs.
+        open_top = max_sep is None and not isinstance(bins, u.Quantity)
         kernel_edges = edges.copy()
-        if max_sep is None and not isinstance(bins, u.Quantity) and np.ndim(bins) == 0:
+        if open_top and np.ndim(bins) == 0:
             kernel_edges[-1] = np.inf
-        summed = dual_tree_pairs(
-            tree.start,
-            tree.end,
-            tree.left,
-            tree.right,
-            tree.centre,
-            tree.radius,
-            tree.moments,
-            tree.patch,
-            frontier(tree, 8 * numba.get_num_threads()),
-            pos.xyz[o],
-            vals.values[o],
-            sig2[o],
-            vals.weights[o],
-            labels[o],
-            kernel_edges,
-            acc,
-            pos.angular,
-            bin_tolerance,
-            east[o],
-            north[o],
-            pcov[o],
-            use_pos,
+        binning = Binning(
+            kernel_edges, pos.angular, bin_tolerance, pos_errors is not None
         )
-        coeff_sq = 2.0
+        start_nodes = frontier(tree, 8 * numba.get_num_threads())
+        summed = tree_pairs(tree.nodes, sources, binning, start_nodes, acc)
+        stencil_sq_sum = 2.0
     else:
-        coeff_sq = 6.0
-        mode = StencilMode(stencil.mode)
-        if mode == StencilMode.EXACT:
-            summed = exact_triplets(
-                tree.start,
-                tree.end,
-                tree.left,
-                tree.centre,
-                tree.radius,
-                tree.roots,
-                pos.xyz[o],
-                vals.values[o],
-                sig2[o],
-                vals.weights[o],
-                labels[o],
-                edges,
-                acc,
-                math.radians(stencil.angle_tol_deg),
-                stencil.sep_tol,
-                east[o],
-                north[o],
-                pcov[o],
-                use_pos,
-            )
-        else:
-            if use_pos:
-                msg = (
-                    "positional errors with 3-point stencils need "
-                    "StencilOptions(mode='exact')"
-                )
-                raise ValueError(msg)
-            # Cells half the tolerance wide; the kernel pairs neighbouring cells.
-            sub_edges, sub_to_bin = _sub_edges(
-                edges, math.sqrt(1.0 + stencil.sep_tol) - 1.0
-            )
-            n_sector = 2 * math.ceil(
-                2.0 * math.pi / math.radians(stencil.angle_tol_deg)
-            )
-            summed = binned_triplets(
-                tree.start,
-                tree.end,
-                tree.left,
-                tree.centre,
-                tree.radius,
-                tree.moments,
-                tree.patch,
-                tree.roots,
-                pos.xyz[o],
-                vals.values[o],
-                sig2[o],
-                vals.weights[o],
-                labels[o],
-                edges,
-                sub_edges,
-                sub_to_bin,
-                n_sector,
-                patch_info.n_patch,
-                acc,
-                east[o],
-                north[o],
-            )
+        stencil_sq_sum = 6.0
+        summed = _three_point(
+            tree,
+            sources,
+            edges,
+            stencil,
+            pos_errors is not None,
+            patch_info.n_patch,
+            acc,
+        )
 
     est = estimate(summed, method, cpw, n_boot, gen)
     _check_resampling(method, patch_info.n_patch, n_bins, edges, patch_info.size, pos)
@@ -320,7 +246,7 @@ def structure_function(
     mu = np.sum(vals.weights * vals.values) / wsum
     # Intrinsic variance: the debiased SF plateaus at sum(c^2) * (Var - <sigma^2>).
     var = np.sum(vals.weights * (vals.values - mu) ** 2) / wsum
-    var -= np.sum(vals.weights * sig2) / wsum
+    var -= np.sum(vals.weights * error_var) / wsum
     sf_err = (
         np.sqrt(np.diag(est.cov)) if est.cov is not None else np.full(n_bins, np.nan)
     )
@@ -333,7 +259,7 @@ def structure_function(
             sf=est.sf,
             sf_err=sf_err,
             noise_bias=est.noise_bias,
-            saturation=np.asarray(coeff_sq * var),
+            saturation=np.asarray(stencil_sq_sum * var),
             cov=est.cov,
             separation=sep_q,
             bin_edges=edges_q,
@@ -349,7 +275,7 @@ def structure_function(
         sf=u.Quantity(est.sf, unit2),
         sf_err=u.Quantity(sf_err, unit2),
         noise_bias=u.Quantity(est.noise_bias, unit2),
-        saturation=u.Quantity(coeff_sq * var, unit2),
+        saturation=u.Quantity(stencil_sq_sum * var, unit2),
         cov=est.cov,
         separation=sep_q,
         bin_edges=edges_q,
@@ -409,6 +335,75 @@ def structure_function_from_table(
     )
 
 
+def _position_covariance(
+    pos_errors: PositionErrors | None, pos: _units.Positions
+) -> tuple[FloatArray, FloatArray]:
+    """Per-source positional covariance and its largest eigenvalue."""
+    n_sources = pos.xyz.shape[0]
+    if pos_errors is None:
+        return np.zeros((n_sources, 3)), np.zeros(n_sources)
+    var_east, var_north, cov = _units.position_covariance(pos_errors, pos)
+    half_sum = 0.5 * (var_east + var_north)
+    largest = half_sum + np.sqrt((0.5 * (var_east - var_north)) ** 2 + cov**2)
+    return np.column_stack((var_east, var_north, cov)), largest
+
+
+def _sources_in_tree_order(
+    tree: Tree,
+    pos: _units.Positions,
+    vals: _units.Values,
+    error_var: FloatArray,
+    labels: IntArray,
+    position_cov: FloatArray,
+) -> Sources:
+    order = tree.order
+    if pos.angular:
+        east, north = tangent_basis(pos.lon, pos.lat)
+    else:
+        east, north = np.zeros_like(pos.xyz), np.zeros_like(pos.xyz)
+    return Sources(
+        pos.xyz[order],
+        vals.values[order],
+        error_var[order],
+        vals.weights[order],
+        labels[order],
+        east[order],
+        north[order],
+        position_cov[order],
+    )
+
+
+def _three_point(
+    tree: Tree,
+    sources: Sources,
+    edges: FloatArray,
+    stencil: StencilOptions,
+    use_position_errors: bool,
+    n_patch: int,
+    acc: FloatArray,
+) -> FloatArray:
+    angle_tol = math.radians(stencil.angle_tol_deg)
+    if StencilMode(stencil.mode) == StencilMode.EXACT:
+        binning = Binning(edges, True, 0.0, use_position_errors)
+        return exact_triplets(
+            tree.nodes, tree.roots, sources, binning, angle_tol, stencil.sep_tol, acc
+        )
+    if use_position_errors:
+        msg = (
+            "positional errors with 3-point stencils need StencilOptions(mode='exact')"
+        )
+        raise ValueError(msg)
+    # Cells are half a tolerance wide; the kernel also pairs neighbouring cells.
+    ring_edges, ring_to_bin = _ring_edges(edges, math.sqrt(1.0 + stencil.sep_tol) - 1.0)
+    grid = PolarGrid(
+        ring_edges,
+        ring_to_bin,
+        np.sqrt(ring_edges[:-1] * ring_edges[1:]),
+        2 * math.ceil(2.0 * math.pi / angle_tol),
+    )
+    return binned_triplets(tree.nodes, tree.roots, sources, edges, grid, n_patch, acc)
+
+
 def _edges(
     bins: int | u.Quantity,
     min_sep: u.Quantity | None,
@@ -432,7 +427,7 @@ def _edges(
     return log_edges(smin, smax, n_bins)
 
 
-def _sub_edges(edges: FloatArray, sep_tol: float) -> tuple[FloatArray, IntArray]:
+def _ring_edges(edges: FloatArray, sep_tol: float) -> tuple[FloatArray, IntArray]:
     """Geometric radial sub-bins of ratio ``<= 1 + sep_tol`` nested in ``edges``."""
     if edges[0] <= 0.0:
         msg = "binned 3-point stencils need a positive minimum separation"
