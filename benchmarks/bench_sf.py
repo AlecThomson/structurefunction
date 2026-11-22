@@ -67,7 +67,8 @@ def main() -> None:
             n,
             partial(structure_function, f, s, c, bins=15, bin_tolerance=0.05),
         )
-        dev = np.nanmax(np.abs(approx.sf - exact.sf) / exact.sf_err)
+        with np.errstate(invalid="ignore", divide="ignore"):  # empty bins
+            dev = np.nanmax(np.abs(approx.sf - exact.sf) / exact.sf_err)
         print(f"{'':<28} max |approx - exact| / sigma = {dev:.3f}")
         if n <= args.three_point_max:
             timed(
