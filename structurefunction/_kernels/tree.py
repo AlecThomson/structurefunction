@@ -71,7 +71,7 @@ def build_tree(
     patch: IntArray,
     n_patch: int,
     pos_var_major: FloatArray,
-    leaf_size: int = 16,
+    leaf_size: int = 4,
 ) -> Tree:
     """Build one subtree per patch (so every node is patch-pure).
 
@@ -303,6 +303,50 @@ def _accept_block(
             _node_pair(acc, slot, k, frac, sep, ma, mb, pa, pb)
 
 
+@numba.njit(cache=True, inline="always")
+def _triangle_cdf(x: float, lo: float, mode: float, hi: float) -> float:
+    """CDF of the triangular distribution on ``[lo, hi]`` peaking at ``mode``."""
+    if x <= lo:
+        return 0.0
+    if x >= hi:
+        return 1.0
+    if x <= mode:
+        return (x - lo) ** 2 / ((hi - lo) * (mode - lo))
+    return 1.0 - (hi - x) ** 2 / ((hi - lo) * (hi - mode))
+
+
+@numba.njit(cache=True)
+def _accept_spread(
+    acc: FloatArray,
+    slot: int,
+    smin: float,
+    sep_c: float,
+    smax: float,
+    edges: FloatArray,
+    ma: FloatArray,
+    mb: FloatArray,
+    pa: int,
+    pb: int,
+) -> None:
+    """Share a node pair between the bins its separations span.
+
+    Separations of the pairs are modelled as triangular on ``[smin, smax]``
+    peaking at the centre separation, which is a good description for two
+    compact groups and much better than assigning everything to one bin.
+    """
+    mode = min(max(sep_c, smin + 1e-15 * smax), smax - 1e-15 * smax)
+    lo = find_bin(max(smin, edges[0]), edges)
+    hi = find_bin(min(smax, np.nextafter(edges[-1], 0.0)), edges)
+    if lo < 0 or hi < 0:
+        return
+    for k in range(lo, hi + 1):
+        a = max(smin, edges[k])
+        b = min(smax, edges[k + 1])
+        frac = _triangle_cdf(b, smin, mode, smax) - _triangle_cdf(a, smin, mode, smax)
+        if frac > 0.0:
+            _node_pair(acc, slot, k, frac, 0.5 * (a + b), ma, mb, pa, pb)
+
+
 @numba.njit(cache=True, parallel=True)
 def dual_tree_pairs(
     start: IntArray,
@@ -313,7 +357,7 @@ def dual_tree_pairs(
     radius: FloatArray,
     moments: FloatArray,
     node_patch: IntArray,
-    roots: IntArray,
+    frontier: IntArray,
     xyz: FloatArray,
     f: FloatArray,
     sig2: FloatArray,
@@ -336,16 +380,18 @@ def dual_tree_pairs(
     (approximate). Otherwise the larger node is split; leaf pairs are summed
     exactly.
     """
-    live = np.where(roots >= 0)[0]
-    n_live = live.size
-    n_tasks = n_live * (n_live + 1) // 2
+    # Every pair of frontier nodes (including each node with itself) is one
+    # parallel task; the frontier partitions the sources, so each source pair
+    # is visited exactly once.
+    n_front = frontier.size
+    n_tasks = n_front * (n_front + 1) // 2
     task_a = np.empty(n_tasks, np.intp)
     task_b = np.empty(n_tasks, np.intp)
     t = 0
-    for ia in range(n_live):
-        for ib in range(ia, n_live):
-            task_a[t] = roots[live[ia]]
-            task_b[t] = roots[live[ib]]
+    for ia in range(n_front):
+        for ib in range(ia, n_front):
+            task_a[t] = frontier[ia]
+            task_b[t] = frontier[ib]
             t += 1
     s_lo = edges[0]
     s_hi = edges[-1]
@@ -425,23 +471,39 @@ def dual_tree_pairs(
                 continue
             if bin_tolerance > 0.0:
                 kc = find_bin(sep_c, edges)
-                if kc >= 0 and 0.5 * (smax - smin) <= bin_tolerance * (
-                    edges[kc + 1] - edges[kc]
-                ):
-                    sigma = 0.0
+                width = 0.0
+                if kc >= 0:
+                    width = edges[kc + 1] - edges[kc]
+                    if not math.isfinite(width):
+                        # Open top bin: use the scale of the bin below it.
+                        width = edges[kc] - edges[max(kc - 1, 0)] if kc > 0 else 0.0
+                if kc >= 0 and 0.5 * (smax - smin) <= bin_tolerance * width:
                     if use_pos:
                         sigma = math.sqrt(moments[a, 5] + moments[b, 5])
-                    _accept_block(
-                        acc,
-                        slot,
-                        sep_c,
-                        sigma,
-                        edges,
-                        moments[a],
-                        moments[b],
-                        node_patch[a],
-                        node_patch[b],
-                    )
+                        _accept_block(
+                            acc,
+                            slot,
+                            sep_c,
+                            sigma,
+                            edges,
+                            moments[a],
+                            moments[b],
+                            node_patch[a],
+                            node_patch[b],
+                        )
+                    else:
+                        _accept_spread(
+                            acc,
+                            slot,
+                            smin,
+                            sep_c,
+                            smax,
+                            edges,
+                            moments[a],
+                            moments[b],
+                            node_patch[a],
+                            node_patch[b],
+                        )
                     continue
             a_leaf = left[a] < 0
             b_leaf = left[b] < 0
@@ -478,3 +540,20 @@ def dual_tree_pairs(
                 stack[top + 1, 1] = right[b]
             top += 2
     return acc.sum(axis=0)
+
+
+def frontier(tree: Tree, min_nodes: int) -> IntArray:
+    """Disjoint nodes covering all sources, at least ``min_nodes`` if possible.
+
+    Starts from the patch roots and repeatedly splits the largest node, so
+    that work can be shared between threads even with a single patch.
+    """
+    nodes = [int(r) for r in tree.roots if r >= 0]
+    while len(nodes) < min_nodes:
+        splittable = [n for n in nodes if tree.left[n] >= 0]
+        if not splittable:
+            break
+        biggest = max(splittable, key=lambda n: tree.end[n] - tree.start[n])
+        nodes.remove(biggest)
+        nodes.extend((int(tree.left[biggest]), int(tree.right[biggest])))
+    return np.asarray(nodes, dtype=np.intp)

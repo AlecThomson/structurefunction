@@ -249,6 +249,7 @@ def binned_triplets(
     sig2: FloatArray,
     w: FloatArray,
     patch: IntArray,
+    edges: FloatArray,
     sub_edges: FloatArray,
     sub_to_bin: IntArray,
     n_sector: int,
@@ -261,11 +262,14 @@ def binned_triplets(
 
     ``sub_edges`` are radial sub-bin edges nested within ``edges``;
     ``sub_to_bin`` maps each sub-bin to its output bin. ``n_sector`` is even.
+    Cells are half the bearing and distance tolerances wide, and each cell is
+    paired with the opposite cell and its eight neighbours.
     """
     n = xyz.shape[0]
     n_slots = acc.shape[0]
     n_sub = sub_edges.size - 1
     n_cell = n_sub * n_sector
+    sub_mid = np.sqrt(sub_edges[:-1] * sub_edges[1:])
     half = n_sector // 2
     width = (2.0 * math.pi) / n_sector
     s_lo = sub_edges[0]
@@ -394,36 +398,63 @@ def binned_triplets(
                         cells[p, cell, 3] += w[i] * sig2[i]
                         cells[p, cell, 4] += w[i] * s
                         cells[p, cell, 5] += 1.0
-            # Pair each touched cell in the first half of sectors with the
-            # opposite cell, across all touched patches.
+            # Pair each touched cell with the opposite cell and its neighbours
+            # in bearing and distance. Cells are half the tolerance wide, so
+            # every such triplet is within the tolerances. Each unordered cell
+            # pair is generated from both ends; keep the one with s1 < s2.
             w0 = w[m]
             pm = patch[m]
             for t in range(n_t):
                 p1 = t_patch[t]
                 c1 = t_cell[t]
-                sec = c1 % n_sector
-                if sec >= half:
-                    continue
-                j = c1 // n_sector
-                c2 = c1 + half
-                b = sub_to_bin[j]
+                s1 = c1 % n_sector
+                j1 = c1 // n_sector
                 x1 = cells[p1, c1]
-                for q in range(n_p):
-                    p2 = plist[q]
-                    if not touched[p2, c2]:
+                for dj in range(-1, 2):
+                    j2 = j1 + dj
+                    if j2 < 0 or j2 >= n_sub:
                         continue
-                    x2 = cells[p2, c2]
-                    ww = w0 * x1[0] * x2[0]
-                    if ww <= 0.0:
-                        continue
-                    wd = w0 * (x2[0] * x1[2] + x1[0] * x2[2] + 2.0 * x1[1] * x2[1])
-                    bias = w0 * (
-                        x2[0] * x1[3] + x1[0] * x2[3] + 4.0 * sig2[m] * x1[0] * x2[0]
-                    )
-                    wr = 0.5 * w0 * (x2[0] * x1[4] + x1[0] * x2[4])
-                    add_triplet(
-                        acc, slot, b, pm, p1, p2, ww, wd, bias, wr, x1[5] * x2[5]
-                    )
+                    if dj == 0:
+                        b = sub_to_bin[j1]
+                    else:
+                        b = find_bin(math.sqrt(sub_mid[j1] * sub_mid[j2]), edges)
+                        if b < 0:
+                            continue
+                    for ds in range(-1, 2):
+                        s2 = (s1 + half + ds) % n_sector
+                        if s1 >= s2:
+                            continue
+                        c2 = j2 * n_sector + s2
+                        for q in range(n_p):
+                            p2 = plist[q]
+                            if not touched[p2, c2]:
+                                continue
+                            x2 = cells[p2, c2]
+                            ww = w0 * x1[0] * x2[0]
+                            if ww <= 0.0:
+                                continue
+                            wd = w0 * (
+                                x2[0] * x1[2] + x1[0] * x2[2] + 2.0 * x1[1] * x2[1]
+                            )
+                            bias = w0 * (
+                                x2[0] * x1[3]
+                                + x1[0] * x2[3]
+                                + 4.0 * sig2[m] * x1[0] * x2[0]
+                            )
+                            wr = 0.5 * w0 * (x2[0] * x1[4] + x1[0] * x2[4])
+                            add_triplet(
+                                acc,
+                                slot,
+                                b,
+                                pm,
+                                p1,
+                                p2,
+                                ww,
+                                wd,
+                                bias,
+                                wr,
+                                x1[5] * x2[5],
+                            )
             # Reset only what was touched.
             for t in range(n_t):
                 cells[t_patch[t], t_cell[t], :] = 0.0

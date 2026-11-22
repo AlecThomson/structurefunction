@@ -110,7 +110,11 @@ def plot_skymap(
         -np.radians(lon_g), np.radians(lat_g), img, cmap=cmap, shading="auto"
     )
     ax.set_xticklabels([])
-    label = name if bin_index is None else f"{name} (bin {bin_index})"
+    label = name
+    if bin_index is not None:
+        lo, hi = result.bin_edges[bin_index], result.bin_edges[bin_index + 1]
+        unit = f"{result.bin_edges.unit:latex_inline}"
+        label = f"{name}, separations {lo.value:.3g} to {hi.value:.3g} {unit}"
     fig.colorbar(mesh, ax=ax, orientation="horizontal", label=label)
     ax.grid(visible=True)
     return fig

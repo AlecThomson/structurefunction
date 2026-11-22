@@ -13,7 +13,7 @@ import numpy as np
 from structurefunction import _units
 from structurefunction._kernels.brute import empty_pos_arrays
 from structurefunction._kernels.common import new_accumulator
-from structurefunction._kernels.tree import build_tree, dual_tree_pairs
+from structurefunction._kernels.tree import build_tree, dual_tree_pairs, frontier
 from structurefunction._kernels.triplets import binned_triplets, exact_triplets
 from structurefunction.estimators import estimate
 from structurefunction.geometry import (
@@ -219,6 +219,12 @@ def structure_function(
         patch_info.n_patch,
     )
     if n_point == 2:
+        # With the default upper edge (the largest separation in the data) no
+        # pair can lie beyond it, so the top bin is left open. Otherwise every
+        # group of pairs that might reach past it is split down to single pairs.
+        kernel_edges = edges.copy()
+        if max_sep is None and not isinstance(bins, u.Quantity) and np.ndim(bins) == 0:
+            kernel_edges[-1] = np.inf
         summed = dual_tree_pairs(
             tree.start,
             tree.end,
@@ -228,13 +234,13 @@ def structure_function(
             tree.radius,
             tree.moments,
             tree.patch,
-            tree.roots,
+            frontier(tree, 8 * numba.get_num_threads()),
             pos.xyz[o],
             vals.values[o],
             sig2[o],
             vals.weights[o],
             labels[o],
-            edges,
+            kernel_edges,
             acc,
             pos.angular,
             bin_tolerance,
@@ -276,8 +282,13 @@ def structure_function(
                     "StencilOptions(mode='exact')"
                 )
                 raise ValueError(msg)
-            sub_edges, sub_to_bin = _sub_edges(edges, stencil.sep_tol)
-            n_sector = 2 * math.ceil(math.pi / math.radians(stencil.angle_tol_deg))
+            # Cells half the tolerance wide; the kernel pairs neighbouring cells.
+            sub_edges, sub_to_bin = _sub_edges(
+                edges, math.sqrt(1.0 + stencil.sep_tol) - 1.0
+            )
+            n_sector = 2 * math.ceil(
+                2.0 * math.pi / math.radians(stencil.angle_tol_deg)
+            )
             summed = binned_triplets(
                 tree.start,
                 tree.end,
@@ -292,6 +303,7 @@ def structure_function(
                 sig2[o],
                 vals.weights[o],
                 labels[o],
+                edges,
                 sub_edges,
                 sub_to_bin,
                 n_sector,
