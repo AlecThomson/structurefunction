@@ -18,6 +18,8 @@ EXAMPLES = sorted((Path(__file__).parents[1] / "docs" / "examples").glob("*.ipyn
 def test_notebook_runs(
     notebook: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if "treecorr" in notebook.name:
+        pytest.importorskip("treecorr")
     monkeypatch.setenv("JUPYTER_PLATFORM_DIRS", "1")
     mpl.use("Agg")
     script, _ = ScriptExporter().from_notebook_node(

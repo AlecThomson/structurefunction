@@ -42,7 +42,10 @@ See the [documentation](https://structurefunction.readthedocs.io/) for the
 methods and a worked example reproducing
 [Mao et al. 2010](https://ui.adsabs.harvard.edu/abs/2010ApJ...714.1170M).
 
-Version 2 is a rewrite and is not backwards compatible with 1.x.
+Version 2 is a rewrite and is not backwards compatible with 1.x; see the
+[migration guide](https://structurefunction.readthedocs.io/en/latest/examples/migration.html).
+A [comparison with TreeCorr](https://structurefunction.readthedocs.io/en/latest/examples/treecorr_comparison.html)
+shows where each is faster and what each offers.
 
 ## Acknowledgment
 

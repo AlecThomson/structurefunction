@@ -8,6 +8,8 @@ three-point stencils, error correction and covariance between bins.
 
 examples/usage
 examples/mao2010
+examples/treecorr_comparison
+examples/migration
 cli
 methods
 ```

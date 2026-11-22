@@ -3053,6 +3053,7 @@ docs = [
     { name = "sphinx-autoapi" },
     { name = "sphinx-autodoc-typehints" },
     { name = "sphinx-copybutton" },
+    { name = "treecorr" },
 ]
 test = [
     { name = "matplotlib" },
@@ -3107,6 +3108,7 @@ docs = [
     { name = "sphinx-autoapi", specifier = ">=3.3" },
     { name = "sphinx-autodoc-typehints", specifier = ">=2" },
     { name = "sphinx-copybutton", specifier = ">=0.5" },
+    { name = "treecorr", specifier = ">=5.1" },
 ]
 test = [
     { name = "matplotlib", specifier = ">=3.8" },
