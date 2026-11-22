@@ -122,6 +122,7 @@ lint.per-file-ignores."docs/**" = [ "INP001" ]
 lint.per-file-ignores."docs/examples/*.ipynb" = [
   "D100", # notebooks have no module docstring
   "E402", # imports live in the cell where they are first needed
+  "I002", # no `from __future__ import annotations` in example notebooks
   "S101", # self-checking examples assert their results
   "T201", # examples print results
 ]

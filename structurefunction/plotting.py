@@ -17,11 +17,10 @@ if TYPE_CHECKING:
     from structurefunction.fitting import FitResult
     from structurefunction.results import SFResult
     from structurefunction.skymap import SkyMapResult
-    from structurefunction.types import FloatArray
 
 
 def plot_sf(
-    result: SFResult[FloatArray] | SFResult[u.Quantity],
+    result: SFResult,
     fit: FitResult | None = None,
     ax: Axes | None = None,
     n_draws: int = 200,
@@ -42,9 +41,9 @@ def plot_sf(
             msg = "ax must belong to a figure"
             raise TypeError(msg)
         fig = root
-    unit = result.sf.unit if isinstance(result.sf, u.Quantity) else None
-    y = np.asarray(u.Quantity(result.sf).value if unit else result.sf)
-    yerr = np.asarray(u.Quantity(result.sf_err).value if unit else result.sf_err)
+    unit = result.sf_unit
+    y = result.sf
+    yerr = result.sf_err
     r = result.separation.value
     good = result.reliable
     ax.errorbar(r[good], y[good], yerr[good], fmt="o", color="k", label="SF")
@@ -66,7 +65,7 @@ def plot_sf(
             zorder=0,
             label="beyond region size: errors underestimated",
         )
-    sat = float(u.Quantity(result.saturation).value if unit else result.saturation)
+    sat = result.saturation
     ax.axhline(sat, ls="--", color="0.5", label=f"{result.n_point}-point plateau")
     if fit is not None:
         gen = np.random.default_rng(rng)

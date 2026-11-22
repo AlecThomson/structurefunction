@@ -10,22 +10,24 @@ from structurefunction.types import BoolArray, ErrorMethod, FloatArray
 
 
 @dataclass(frozen=True, slots=True)
-class SFResult[V: (FloatArray, u.Quantity)]:
+class SFResult:
     """A binned, noise-debiased structure function and its uncertainties.
 
-    ``V`` is ``Quantity`` when the input values had units (the structure
-    function then carries ``unit**2``) and a plain float array otherwise.
+    Values are plain arrays in ``sf_unit`` (the input unit squared, or ``None``
+    for unitless input); ``result.sf * result.sf_unit`` gives a Quantity.
     See :mod:`structurefunction.io` for reading and writing.
     """
 
-    sf: V
+    sf: FloatArray
     """Noise-debiased structure function per bin."""
-    sf_err: V
+    sf_err: FloatArray
     """Square root of the covariance diagonal (NaN without resampling)."""
-    noise_bias: V
+    noise_bias: FloatArray
     """Noise bias subtracted per bin, ``<sum_i c_i^2 sigma_i^2>``."""
-    saturation: V
+    saturation: float
     """Large-scale plateau, ``sum c^2 (Var(f) - <sigma^2>)`` (noise removed)."""
+    sf_unit: u.UnitBase | None
+    """Unit of ``sf``, ``sf_err``, ``noise_bias`` and ``saturation``, or ``None``."""
     cov: FloatArray | None
     """Bin-to-bin covariance of ``sf`` (in ``unit**4``), or ``None``."""
     separation: u.Quantity

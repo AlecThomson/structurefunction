@@ -23,7 +23,6 @@ from conftest import make_catalogue
 
 if TYPE_CHECKING:
     from structurefunction.options import PositionErrors
-    from structurefunction.types import FloatArray
 
 EDGES = np.geomspace(0.05, 2.0, 7) * u.deg
 
@@ -33,7 +32,7 @@ def run(
     pos: PositionErrors | None,
     tol: float = 0.0,
     n_point: Literal[2, 3] = 2,
-) -> SFResult[FloatArray]:
+) -> SFResult:
     cat = make_catalogue(400, seed=cat_seed, size_deg=4.0)
     return structure_function(
         cat.values,
@@ -68,7 +67,7 @@ def test_ra_conventions_and_time_units_agree() -> None:
     coord = (on_sky / np.cos(np.radians(lat))).to(u.arcsec)
     coord_time = coord.to_value(u.arcsec) / 15.0 * u.s  # seconds of RA
 
-    def go(err: AxisPositionErrors) -> SFResult[FloatArray]:
+    def go(err: AxisPositionErrors) -> SFResult:
         return structure_function(
             cat.values,
             None,

@@ -19,7 +19,7 @@ from structurefunction.types import FitModelLike, FloatArray
 TRUTH = np.array([0.5, 0.0, 1.6, 0.2])  # log10 A, log10 r_b [deg], slopes
 
 
-def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult[FloatArray]:
+def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult:
     """An SFResult drawn from a known model with a known 5% covariance."""
     rng = np.random.default_rng(seed)
     edges = np.geomspace(0.05, 20, 15)
@@ -29,11 +29,12 @@ def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult[Floa
     corr = 0.5 ** np.abs(np.subtract.outer(np.arange(r.size), np.arange(r.size)))
     cov = np.outer(0.05 * truth, 0.05 * truth) * corr
     sf = rng.multivariate_normal(truth, cov)
-    return SFResult[FloatArray](
+    return SFResult(
         sf=sf,
         sf_err=np.sqrt(np.diag(cov)),
         noise_bias=np.zeros_like(sf),
-        saturation=np.asarray(np.nan),
+        saturation=float("nan"),
+        sf_unit=None,
         cov=cov,
         separation=r * u.deg,
         bin_edges=edges * u.deg,
@@ -106,7 +107,7 @@ def test_nautilus_gives_evidence() -> None:
     assert np.isfinite(fit.log_evidence)
 
 
-def flat_result(level: float, seed: int) -> SFResult[FloatArray]:
+def flat_result(level: float, seed: int) -> SFResult:
     """A flat structure function with a known 5% diagonal covariance."""
     template = injected(TRUTH, seed)
     rng = np.random.default_rng(seed)

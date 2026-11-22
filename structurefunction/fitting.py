@@ -190,7 +190,7 @@ def _starting_points(
 
 
 def fit_sf(
-    result: SFResult[FloatArray] | SFResult[u.Quantity],
+    result: SFResult,
     model: FitModelLike = FitModel.BROKEN_POWER_LAW,
     sampler: SamplerLike = Sampler.EMCEE,
     likelihood: LikelihoodLike = Likelihood.SELLENTIN_HEAVENS,
@@ -238,8 +238,8 @@ def fit_sf(
     mask = result.reliable if use is None else use
     sep_unit = result.separation.unit
     r = np.asarray(result.separation.to_value(sep_unit))[mask]
-    sf_unit = result.sf.unit if isinstance(result.sf, u.Quantity) else None
-    y = np.asarray(u.Quantity(result.sf).value if sf_unit else result.sf)[mask]
+    sf_unit = result.sf_unit
+    y = result.sf[mask]
     cov = result.cov[np.ix_(mask, mask)]
     names = _parameter_names(model)
     n_par = len(names)
@@ -414,7 +414,7 @@ def _laplace(log_post: Callable[[FloatArray], float], theta: FloatArray) -> Floa
 
 
 def compare_models(
-    result: SFResult[FloatArray] | SFResult[u.Quantity],
+    result: SFResult,
     models: tuple[FitModelLike, ...] = (
         FitModel.CONSTANT,
         FitModel.POWER_LAW,

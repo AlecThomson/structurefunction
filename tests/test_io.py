@@ -30,9 +30,8 @@ def test_result_round_trips_through_ecsv(tmp_path: Path) -> None:
     out = tmp_path / "sf.ecsv"
     write(res, out)
     back = read_sf(out)
-    assert isinstance(back.sf, u.Quantity)
-    assert back.sf.unit == (u.rad / u.m**2) ** 2
-    np.testing.assert_allclose(back.sf.value, u.Quantity(res.sf).value)
+    assert back.sf_unit == (u.rad / u.m**2) ** 2
+    np.testing.assert_allclose(back.sf, res.sf)
     assert back.cov is not None
     assert res.cov is not None
     np.testing.assert_allclose(back.cov, res.cov)

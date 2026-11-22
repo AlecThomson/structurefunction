@@ -33,7 +33,7 @@ def to_table(result: object) -> QTable:
 
 
 def write(
-    result: SFResult[FloatArray] | SFResult[u.Quantity] | SkyMapResult,
+    result: SFResult | SkyMapResult,
     path: str | Path,
     overwrite: bool = False,
 ) -> None:
@@ -51,29 +51,30 @@ def _column_values(table: QTable, name: str) -> FloatArray:
 
 
 @to_table.register
-def _sf_to_table(result: SFResult) -> QTable:  # type: ignore[type-arg]
+def _sf_to_table(result: SFResult) -> QTable:
+    def with_unit(values: FloatArray) -> FloatArray | u.Quantity:
+        return values if result.sf_unit is None else u.Quantity(values, result.sf_unit)
+
     table = QTable()
-    has_units = isinstance(result.sf, u.Quantity)
     table["separation"] = result.separation
     table["bin_lo"] = result.bin_edges[:-1]
     table["bin_hi"] = result.bin_edges[1:]
-    table["sf"] = result.sf
-    table["sf_err"] = result.sf_err
-    table["noise_bias"] = result.noise_bias
+    table["sf"] = with_unit(result.sf)
+    table["sf_err"] = with_unit(result.sf_err)
+    table["noise_bias"] = with_unit(result.noise_bias)
     table["count"] = result.count
     table["weight"] = result.weight
     table["reliable"] = result.reliable
     table["resampling_reliable"] = result.resampling_reliable
     if result.cov is not None:
         table["cov"] = result.cov
-    saturation = u.Quantity(result.saturation).value if has_units else result.saturation
     table.meta.update(
         NPOINT=result.n_point,
         NREGIONS=result.n_regions,
         ERRMETH=str(result.error_method),
         MINCOUNT=result.min_count,
-        SATURATE=float(np.asarray(saturation)),
-        SFUNIT=str(u.Quantity(result.sf).unit) if has_units else "",
+        SATURATE=result.saturation,
+        SFUNIT="" if result.sf_unit is None else str(result.sf_unit),
         REGSIZE=(
             float("nan")
             if result.region_size is None
@@ -84,67 +85,38 @@ def _sf_to_table(result: SFResult) -> QTable:  # type: ignore[type-arg]
     return table
 
 
-def sf_from_table(table: Table) -> SFResult[FloatArray] | SFResult[u.Quantity]:
+def sf_from_table(table: Table) -> SFResult:
     """Rebuild a structure function from :func:`to_table` output."""
     qtable = QTable(table)
     meta = qtable.meta
     lo, hi = qtable["bin_lo"], qtable["bin_hi"]
-    edges = u.Quantity(np.append(lo.value, hi.value[-1]), lo.unit)
     region_size = (
         u.Quantity(meta["REGSIZE"], u.Unit(meta["REGUNIT"]))
         if meta["REGUNIT"]
         else None
     )
-    sf = _column_values(qtable, "sf")
-    sf_err = _column_values(qtable, "sf_err")
-    bias = _column_values(qtable, "noise_bias")
-    saturation = np.asarray(meta["SATURATE"], dtype=np.float64)
-    cov = np.asarray(qtable["cov"]) if "cov" in qtable.colnames else None
-    count = _column_values(qtable, "count")
-    weight = _column_values(qtable, "weight")
-    reliable = np.asarray(qtable["reliable"], dtype=bool)
-    resampling_reliable = np.asarray(qtable["resampling_reliable"], dtype=bool)
-    if not meta["SFUNIT"]:
-        return SFResult[FloatArray](
-            sf=sf,
-            sf_err=sf_err,
-            noise_bias=bias,
-            saturation=saturation,
-            cov=cov,
-            separation=qtable["separation"],
-            bin_edges=edges,
-            count=count,
-            weight=weight,
-            n_point=int(meta["NPOINT"]),
-            n_regions=int(meta["NREGIONS"]),
-            error_method=ErrorMethod(meta["ERRMETH"]),
-            min_count=int(meta["MINCOUNT"]),
-            reliable=reliable,
-            region_size=region_size,
-            resampling_reliable=resampling_reliable,
-        )
-    unit = u.Unit(meta["SFUNIT"])
-    return SFResult[u.Quantity](
-        sf=u.Quantity(sf, unit),
-        sf_err=u.Quantity(sf_err, unit),
-        noise_bias=u.Quantity(bias, unit),
-        saturation=u.Quantity(saturation, unit),
-        cov=cov,
+    return SFResult(
+        sf=_column_values(qtable, "sf"),
+        sf_err=_column_values(qtable, "sf_err"),
+        noise_bias=_column_values(qtable, "noise_bias"),
+        saturation=float(meta["SATURATE"]),
+        sf_unit=u.Unit(meta["SFUNIT"]) if meta["SFUNIT"] else None,
+        cov=np.asarray(qtable["cov"]) if "cov" in qtable.colnames else None,
         separation=qtable["separation"],
-        bin_edges=edges,
-        count=count,
-        weight=weight,
+        bin_edges=u.Quantity(np.append(lo.value, hi.value[-1]), lo.unit),
+        count=_column_values(qtable, "count"),
+        weight=_column_values(qtable, "weight"),
         n_point=int(meta["NPOINT"]),
         n_regions=int(meta["NREGIONS"]),
         error_method=ErrorMethod(meta["ERRMETH"]),
         min_count=int(meta["MINCOUNT"]),
-        reliable=reliable,
+        reliable=np.asarray(qtable["reliable"], dtype=bool),
         region_size=region_size,
-        resampling_reliable=resampling_reliable,
+        resampling_reliable=np.asarray(qtable["resampling_reliable"], dtype=bool),
     )
 
 
-def read_sf(path: str | Path) -> SFResult[FloatArray] | SFResult[u.Quantity]:
+def read_sf(path: str | Path) -> SFResult:
     """Read a structure function written by :func:`write`."""
     return sf_from_table(Table.read(path))
 

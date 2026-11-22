@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import astropy.units as u
 import numpy as np
 import pytest
@@ -12,13 +10,10 @@ from structurefunction import SFResult, structure_function
 from conftest import Catalogue, make_catalogue
 from reference import sf2, unit_vectors
 
-if TYPE_CHECKING:
-    from structurefunction.types import FloatArray
-
 EDGES = np.geomspace(0.1, 6.0, 9) * u.deg
 
 
-def run(cat: Catalogue, tol: float = 0.0) -> SFResult[FloatArray]:
+def run(cat: Catalogue, tol: float = 0.0) -> SFResult:
     return structure_function(
         cat.values,
         cat.errors,
@@ -88,8 +83,9 @@ def test_units_round_trip(small: Catalogue) -> None:
         regions=8,
         rng=0,
     )
-    assert res.sf.unit == unit**2
-    np.testing.assert_allclose(res.sf.value, plain.sf, rtol=1e-10)
+    assert res.sf_unit == unit**2
+    assert plain.sf_unit is None
+    np.testing.assert_allclose(res.sf, plain.sf, rtol=1e-10)
 
 
 def test_mixed_units_raise(small: Catalogue) -> None:

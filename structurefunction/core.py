@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Literal
 
 import astropy.units as u
 import numba
@@ -44,51 +44,6 @@ if TYPE_CHECKING:
     from structurefunction.options import PositionErrors
 
 
-@overload
-def structure_function(
-    values: u.Quantity,
-    errors: u.Quantity | None,
-    coords: SkyCoord,
-    n_point: Literal[2, 3] = 2,
-    bins: int | u.Quantity = 10,
-    min_sep: u.Quantity | None = None,
-    max_sep: u.Quantity | None = None,
-    weights: ArrayLike | None = None,
-    regions: int | ArrayLike = 64,
-    error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
-    n_boot: int = 1000,
-    bin_tolerance: float = 0.05,
-    pos_errors: PositionErrors | None = None,
-    stencil: StencilOptions | None = None,
-    min_count: int = 10,
-    rng: np.random.Generator | int | None = None,
-) -> SFResult[u.Quantity]: ...
-
-
-@overload
-def structure_function(
-    values: ArrayLike,
-    errors: ArrayLike | None,
-    coords: SkyCoord,
-    n_point: Literal[2, 3] = 2,
-    bins: int | u.Quantity = 10,
-    min_sep: u.Quantity | None = None,
-    max_sep: u.Quantity | None = None,
-    weights: ArrayLike | None = None,
-    regions: int | ArrayLike = 64,
-    error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
-    n_boot: int = 1000,
-    bin_tolerance: float = 0.05,
-    pos_errors: PositionErrors | None = None,
-    stencil: StencilOptions | None = None,
-    min_count: int = 10,
-    rng: np.random.Generator | int | None = None,
-) -> SFResult[FloatArray]: ...
-
-
-@overload
 def structure_function(
     values: ArrayLike | u.Quantity,
     errors: ArrayLike | u.Quantity | None,
@@ -107,28 +62,7 @@ def structure_function(
     stencil: StencilOptions | None = None,
     min_count: int = 10,
     rng: np.random.Generator | int | None = None,
-) -> SFResult[u.Quantity] | SFResult[FloatArray]: ...
-
-
-def structure_function(
-    values: ArrayLike | u.Quantity,
-    errors: ArrayLike | u.Quantity | None,
-    coords: SkyCoord,
-    n_point: Literal[2, 3] = 2,
-    bins: int | u.Quantity = 10,
-    min_sep: u.Quantity | None = None,
-    max_sep: u.Quantity | None = None,
-    weights: ArrayLike | None = None,
-    regions: int | ArrayLike = 64,
-    error_method: ErrorMethodLike = ErrorMethod.JACKKNIFE,
-    cross_region_weight: CrossRegionWeightLike = CrossRegionWeight.SIMPLE,
-    n_boot: int = 1000,
-    bin_tolerance: float = 0.05,
-    pos_errors: PositionErrors | None = None,
-    stencil: StencilOptions | None = None,
-    min_count: int = 10,
-    rng: np.random.Generator | int | None = None,
-) -> SFResult[u.Quantity] | SFResult[FloatArray]:
+) -> SFResult:
     """Second-order structure function with a 2- or 3-point stencil.
 
     The noise bias ``<sum_i c_i^2 sigma_i^2>`` is subtracted exactly. The
@@ -262,32 +196,13 @@ def structure_function(
     common_method = method if region_info.n_regions > 1 else ErrorMethod.NONE
     reliable = (est.count >= min_count) & np.isfinite(est.sf)
     resampling_reliable = np.asarray(sep_q < reported_region_size, dtype=bool)
-    unit = vals.unit
-    if unit is None:
-        return SFResult[FloatArray](
-            sf=est.sf,
-            sf_err=sf_err,
-            noise_bias=est.noise_bias,
-            saturation=np.asarray(stencil_sq_sum * var),
-            cov=est.cov,
-            separation=sep_q,
-            bin_edges=edges_q,
-            count=est.count,
-            weight=est.weight,
-            n_point=n_point,
-            n_regions=region_info.n_regions,
-            error_method=common_method,
-            min_count=min_count,
-            reliable=reliable,
-            region_size=reported_region_size,
-            resampling_reliable=resampling_reliable,
-        )
-    unit2 = unit**2
-    return SFResult[u.Quantity](
-        sf=u.Quantity(est.sf, unit2),
-        sf_err=u.Quantity(sf_err, unit2),
-        noise_bias=u.Quantity(est.noise_bias, unit2),
-        saturation=u.Quantity(stencil_sq_sum * var, unit2),
+    sf_unit = None if vals.unit is None else vals.unit**2
+    return SFResult(
+        sf=est.sf,
+        sf_err=sf_err,
+        noise_bias=est.noise_bias,
+        saturation=float(stencil_sq_sum * var),
+        sf_unit=sf_unit,
         cov=est.cov,
         separation=sep_q,
         bin_edges=edges_q,
@@ -317,7 +232,7 @@ def structure_function_from_table(
     pos_errors: PositionErrors | None = None,
     stencil: StencilOptions | None = None,
     rng: np.random.Generator | int | None = None,
-) -> SFResult[u.Quantity] | SFResult[FloatArray]:
+) -> SFResult:
     """Convenience wrapper taking column names of an astropy Table.
 
     Columns without units are used as plain arrays; coordinate columns

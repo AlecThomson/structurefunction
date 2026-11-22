@@ -331,15 +331,11 @@ def structure_function_skymap(
                 stencil=stencil,
                 rng=gen,
             )
-        sf_q = res.sf
-        if isinstance(sf_q, u.Quantity):
-            sf_unit = sf_q.unit
+        sf_unit = res.sf_unit
         rows.append(int(pix))
         out["n_eff"].append(np.array([n_eff]))
-        out["sf"].append(np.asarray(getattr(sf_q, "value", sf_q), dtype=np.float64))
-        out["sf_err"].append(
-            np.asarray(getattr(res.sf_err, "value", res.sf_err), dtype=np.float64)
-        )
+        out["sf"].append(res.sf)
+        out["sf_err"].append(res.sf_err)
         out["count"].append(res.count)
         out["sep"].append(np.asarray(res.separation.to_value(edges_q.unit)))
         par = np.full(len(names), np.nan)
