@@ -98,8 +98,7 @@ def structure_function(
         jk_regions: Jackknife regions: ``"auto"`` (see
             :func:`structurefunction.regions.recommend_jk_regions`), a number
             (found by k-means on positions), or a region label per source.
-            Use several times as many regions as bins, each larger than the
-            separations of interest.
+            Use several times as many regions as bins.
         error_method: ``jackknife`` (default), ``bootstrap`` or ``none``.
         cross_region_weight: Jackknife weight of cross-region contributions.
         n_boot: Number of bootstrap resamples.
@@ -145,7 +144,7 @@ def structure_function(
         if jk_regions != "auto":
             msg = f"jk_regions must be a number, labels or 'auto', got {jk_regions!r}"
             raise ValueError(msg)
-        jk_regions = recommend_jk_regions(pos.xyz, pos.angular, edges[-1], n_bins)
+        jk_regions = recommend_jk_regions(pos.xyz.shape[0], n_bins)
     region_info = make_regions(pos.xyz, jk_regions, gen)
     logger.info("Using %d jackknife regions", region_info.n_regions)
     labels = region_info.labels
@@ -218,7 +217,7 @@ def structure_function(
     region_size = float(
         chord_to_separation(np.array([region_info.size]), pos.angular)[0]
     )
-    _check_resampling(method, region_info.n_regions, n_bins, edges, region_size)
+    _check_resampling(method, region_info.n_regions, n_bins)
     reported_region_size = units.to_reported_separation(np.array([region_size]), pos)[0]
 
     wsum = vals.weights.sum()
@@ -233,7 +232,6 @@ def structure_function(
     edges_q = units.to_reported_separation(edges, pos)
     common_method = method if region_info.n_regions > 1 else ErrorMethod.NONE
     reliable = (est.count >= min_count) & np.isfinite(est.sf)
-    resampling_reliable = np.asarray(sep_q < reported_region_size, dtype=bool)
     sf_unit = None if vals.unit is None else vals.unit**2
     return SFResult(
         sf=est.sf,
@@ -252,7 +250,6 @@ def structure_function(
         min_count=min_count,
         reliable=reliable,
         region_size=reported_region_size,
-        resampling_reliable=resampling_reliable,
     )
 
 
@@ -456,8 +453,6 @@ def _check_resampling(
     method: ErrorMethod,
     n_regions: int,
     n_bins: int,
-    edges: FloatArray,
-    region_size: float,
 ) -> None:
     if method == ErrorMethod.NONE:
         return
@@ -467,9 +462,4 @@ def _check_resampling(
             "and possibly singular (aim for n_regions >= 3 * n_bins)",
             StructureFunctionWarning,
             stacklevel=3,
-        )
-    if edges[-1] > region_size:
-        logger.info(
-            "Bins beyond the typical region size have underestimated errors; "
-            "see SFResult.resampling_reliable"
         )

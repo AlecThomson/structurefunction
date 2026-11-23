@@ -65,7 +65,6 @@ def _sf_to_table(result: SFResult) -> QTable:
     table["count"] = result.count
     table["weight"] = result.weight
     table["reliable"] = result.reliable
-    table["resampling_reliable"] = result.resampling_reliable
     if result.cov is not None:
         table["cov"] = result.cov
     table.meta.update(
@@ -112,7 +111,6 @@ def sf_from_table(table: Table) -> SFResult:
         min_count=int(meta["MINCOUNT"]),
         reliable=np.asarray(qtable["reliable"], dtype=bool),
         region_size=region_size,
-        resampling_reliable=np.asarray(qtable["resampling_reliable"], dtype=bool),
     )
 
 

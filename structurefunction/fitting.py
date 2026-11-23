@@ -212,9 +212,7 @@ def fit_sf(
         sampler: ``map`` (Laplace errors), ``emcee`` or ``nautilus`` (evidence).
         likelihood: How the estimated covariance enters the likelihood.
         priors: Uniform prior bounds.
-        use: Bins to fit (default: ``result.reliable``). Bins larger than the
-            resampling regions have underestimated errors; to leave them out,
-            pass ``result.reliable & result.resampling_reliable``.
+        use: Bins to fit (default: ``result.reliable``).
         n_walkers: emcee walkers.
         n_steps: emcee steps per walker.
         n_burn: emcee steps discarded as burn-in.

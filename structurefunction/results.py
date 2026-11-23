@@ -50,9 +50,3 @@ class SFResult:
     """Bins with at least ``min_count`` contributions and a finite estimate."""
     region_size: u.Quantity | None
     """Typical diameter of the resampling regions (``None`` if unknown)."""
-    resampling_reliable: BoolArray
-    """Bins smaller than the typical region size.
-
-    Region resampling misses variance on scales larger than a region, so the
-    errors of the other bins are underestimated.
-    """

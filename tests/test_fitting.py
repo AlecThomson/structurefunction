@@ -46,7 +46,6 @@ def injected(theta: FloatArray, seed: int, broken: bool = True) -> SFResult:
         min_count=10,
         reliable=np.ones(r.size, dtype=bool),
         region_size=None,
-        resampling_reliable=np.ones(r.size, dtype=bool),
     )
 
 

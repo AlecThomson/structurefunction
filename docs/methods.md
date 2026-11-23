@@ -74,18 +74,18 @@ catalogue), the top bin is treated as open, since no pair can lie beyond it.
 The errors come from **jackknife regions**: the catalogue is split into compact
 areas of sky of similar size (by k-means clustering of the source positions),
 and the structure function is recomputed with each region left out in turn. The
-spread of those estimates gives the covariance between bins. This includes the measurement errors and the
-variation between different parts of the sky. It misses variance on scales
-larger than a region, so errors of bins beyond the typical region size
-(`SFResult.region_size`, `SFResult.resampling_reliable`) are underestimated. The
+spread of those estimates gives the covariance between bins. This includes the
+measurement errors and the variation between different parts of the sky. The
 bootstrap option resamples regions instead.
 
-With `jk_regions="auto"` (the default), up to 64 regions are used, but never
-fewer than three per bin, and no more than allow each region to be at least as
-large as the largest binned separation. On a small field these can conflict:
-then regions are kept at three per bin, a message says above which separation
-errors are underestimated, and `resampling_reliable` flags those bins. Fewer
-bins, or a smaller `max_sep`, avoid the conflict.
+Like any error estimate made from a single field, the jackknife cannot see
+variation on scales comparable to the whole field, so the errors of the largest
+separations (approaching the field size) are likely to be too small.
+
+With `jk_regions="auto"` (the default), 64 regions are used, raised to three per
+bin when there are more than 21 bins, and capped so that each region has at
+least 10 sources. Fewer regions per bin make the covariance too noisy to fit
+with.
 
 ## Fitting and choosing a model
 
