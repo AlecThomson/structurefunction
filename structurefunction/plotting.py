@@ -48,7 +48,7 @@ def plot_sf(
     from matplotlib.figure import Figure
 
     if ax is None:
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(layout="constrained")
     else:
         root = ax.get_figure(root=True)
         if not isinstance(root, Figure):
@@ -95,8 +95,22 @@ def plot_sf(
     ax.set_xlabel(f"Separation [{result.separation.unit:latex_inline}]")
     label = "SF" if unit is None else f"SF [{unit:latex_inline}]"
     ax.set_ylabel(label)
-    ax.legend()
+    legend_below(ax)
     return fig
+
+
+def legend_below(ax: Axes) -> None:
+    """Draw the legend below the axes, clear of the data.
+
+    Use a figure with ``layout="constrained"`` so the legend is not clipped.
+    """
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.12),
+        ncols=2,
+        fontsize="small",
+        frameon=False,
+    )
 
 
 def plot_skymap(
